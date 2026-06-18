@@ -1,0 +1,13 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local databases
+*.db
+demo.db
+
+# OS files
+.DS_Store
+Thumbs.db

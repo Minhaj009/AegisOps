@@ -1,0 +1,40 @@
+#!/bin/sh
+# AegisOps Pre-Commit Git Hook Template
+# Scans for security credentials, syntax errors, and validates formatting.
+
+echo "=========================================================="
+echo "AegisOps Guardrails: Running Pre-Commit Checks..."
+echo "=========================================================="
+
+# 1. Check for hardcoded API keys or secrets
+# Simple grep rule looking for standard cloud key prefixes or generic assignments
+SECRET_FOUND=0
+git diff --cached --name-only | xargs grep -E "DASHSCOPE_API_KEY\s*=\s*['\"][A-Za-z0-9_]{10,}['\"]|LTAI[A-Za-z0-9]{20}" /dev/null 2>/dev/null
+if [ $? -eq 0 ]; then
+    echo "[SECURITY ALERT] Hardcoded credentials detected in staging area! Commit blocked."
+    SECRET_FOUND=1
+fi
+
+# 2. Syntax Validation check for Python
+PYTHON_ERROR=0
+for file in $(git diff --cached --name-only | grep '\.py$'); do
+    if [ -f "$file" ]; then
+        python -m py_compile "$file"
+        if [ $? -ne 0 ]; then
+            echo "[SYNTAX ERROR] Compile check failed for $file! Commit blocked."
+            PYTHON_ERROR=1
+        fi
+    fi
+done
+
+# 3. Decision Tree Action
+if [ $SECRET_FOUND -ne 0 ] || [ $PYTHON_ERROR -ne 0 ]; then
+    echo "----------------------------------------------------------"
+    echo "Result: FAIL. Please resolve the errors above before committing."
+    echo "=========================================================="
+    exit 1
+fi
+
+echo "Result: PASS. Code checks succeeded."
+echo "=========================================================="
+exit 0

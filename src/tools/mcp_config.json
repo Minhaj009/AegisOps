@@ -1,0 +1,91 @@
+{
+  "mcpServers": {
+    "repo-parser": {
+      "command": "python",
+      "args": ["-m", "src.tools.mcp_server", "--server", "repo-parser"],
+      "env": {},
+      "tools": [
+        {
+          "name": "parse_codebase_ast",
+          "description": "Parse codebase files and return the Abstract Syntax Tree (AST) structure, mapping imports, class definitions, and function declarations.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "repo_path": {
+                "type": "string",
+                "description": "Absolute path to the repository on the filesystem."
+              },
+              "target_extensions": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": [".py", ".js", ".java", ".go"],
+                "description": "File extensions to parse."
+              }
+            },
+            "required": ["repo_path"]
+          }
+        }
+      ]
+    },
+    "vuln-scanner": {
+      "command": "python",
+      "args": ["-m", "src.tools.mcp_server", "--server", "vuln-scanner"],
+      "env": {},
+      "tools": [
+        {
+          "name": "scan_vulnerabilities",
+          "description": "Scan codebase structure for known vulnerability signatures (CWE, OWASP Top 10) and unoptimized deployment anti-patterns.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "repo_path": {
+                "type": "string",
+                "description": "Absolute path to the codebase directory."
+              },
+              "strictness_level": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "default": "high"
+              }
+            },
+            "required": ["repo_path"]
+          }
+        }
+      ]
+    },
+    "env-provisioner": {
+      "command": "python",
+      "args": ["-m", "src.tools.mcp_server", "--server", "env-provisioner"],
+      "env": {},
+      "tools": [
+        {
+          "name": "provision_sandbox_container",
+          "description": "Provision an isolated container environment for running verification unit tests and reproducing exploits.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "image_name": {
+                "type": "string",
+                "default": "aegisops-sandbox:latest",
+                "description": "Docker image name to use."
+              },
+              "sandbox_id": {
+                "type": "string",
+                "description": "Unique identifier for the sandbox lifecycle."
+              },
+              "cpu_limit": {
+                "type": "string",
+                "default": "1.0"
+              },
+              "mem_limit": {
+                "type": "string",
+                "default": "512m"
+              }
+            },
+            "required": ["sandbox_id"]
+          }
+        }
+      ]
+    }
+  }
+}

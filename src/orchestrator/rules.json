@@ -1,0 +1,43 @@
+{
+  "pipeline": {
+    "stages": [
+      {
+        "name": "Audit",
+        "sender": "System",
+        "processor": "LeadAuditorAgent",
+        "on_success": "Remediation",
+        "on_failure": "AbortPipeline"
+      },
+      {
+        "name": "Remediation",
+        "sender": "LeadAuditorAgent",
+        "processor": "PatchDeveloperAgent",
+        "on_success": "Verification",
+        "on_failure": "AbortPipeline"
+      },
+      {
+        "name": "Verification",
+        "sender": "PatchDeveloperAgent",
+        "processor": "SandboxEngineerAgent",
+        "on_success": "Deployment",
+        "on_failure": "RetryRemediation"
+      },
+      {
+        "name": "Deployment",
+        "sender": "SandboxEngineerAgent",
+        "processor": "GitManager",
+        "on_success": "SuccessPipeline",
+        "on_failure": "ManualReviewRequired"
+      }
+    ],
+    "thresholds": {
+      "consensus_agreement_pct": 100,
+      "max_verification_retries": 3,
+      "sandbox_timeout_seconds": 300
+    },
+    "retry_loop": {
+      "allow_developer_repatch": true,
+      "developer_repatch_limit": 2
+    }
+  }
+}
