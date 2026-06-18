@@ -11,3 +11,9 @@ demo.db
 # OS files
 .DS_Store
 Thumbs.db
+
+# Agent Instruction and Skill files (local workspace alignment)
+.agents/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
