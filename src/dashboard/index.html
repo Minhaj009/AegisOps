@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AegisOps | Command Cockpit</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Geist and JetBrains Mono fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <script src="https://kit.fontawesome.com/0c13a9f144.js" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Global Navigation -->
+        <nav class="global-nav">
+            <div class="nav-brand">
+                <img src="/logo.png" alt="AegisOps Logo" class="brand-logo-img">
+                <span class="brand-name">AegisOps <span class="version-tag">v1.2</span></span>
+            </div>
+
+            <div class="nav-status">
+                <span class="status-indicator"></span>
+                <span class="status-label">Alibaba Cloud Active</span>
+            </div>
+        </nav>
+
+        <!-- Telemetry Ribbon -->
+        <section class="telemetry-ribbon">
+            <div class="telemetry-item">
+                <span class="item-title">TOKEN COUNTER</span>
+                <span id="hud-tokens" class="item-value">0</span>
+            </div>
+            <div class="telemetry-divider"></div>
+            <div class="telemetry-item">
+                <span class="item-title">SANDBOX STATE (ISOLATED)</span>
+                <span id="hud-sandbox" class="item-value state-inactive">OFFLINE</span>
+            </div>
+            <div class="telemetry-divider"></div>
+            <div class="telemetry-item">
+                <span class="item-title">ACTIVE PIPELINE RUNTIME</span>
+                <span id="hud-runtime" class="item-value">00:00</span>
+            </div>
+        </section>
+
+        <!-- Main Dashboard Frame -->
+        <main class="dashboard-frame">
+            <div class="workspace-grid">
+                
+                <!-- Unified Control Sidebar -->
+                <aside class="sidebar-pane">
+                    <!-- Target Repository Card -->
+                    <section class="workspace-card">
+                        <div class="card-title">
+                            <i class="fa-solid fa-folder-tree"></i>
+                            <h2>Target Repository</h2>
+                        </div>
+                        <form id="run-form" class="run-form">
+                            <div class="input-group">
+                                <i class="fa-regular fa-folder-open input-icon"></i>
+                                <input type="text" id="target-path" placeholder="e.g. demo_targets/vulnerable_app" required autocomplete="off">
+                            </div>
+                            <div class="mode-selector">
+                                <label class="mode-label">
+                                    <input type="radio" name="pipeline-mode" value="autopilot" checked>
+                                    <span class="mode-text"><i class="fa-solid fa-bolt"></i> Autopilot</span>
+                                </label>
+                                <label class="mode-label">
+                                    <input type="radio" name="pipeline-mode" value="copilot">
+                                    <span class="mode-text"><i class="fa-solid fa-user-gear"></i> Co-pilot</span>
+                                </label>
+                            </div>
+                            <button type="submit" id="submit-btn" class="primary-btn">
+                                <span class="btn-text">Deploy Patch</span>
+                                <i class="fa-solid fa-paper-plane"></i>
+                            </button>
+                        </form>
+                    </section>
+
+                    <!-- Agent State Machine Timeline -->
+                    <section class="workspace-card timeline-card">
+                        <div class="card-title">
+                            <i class="fa-solid fa-list-check"></i>
+                            <h2>Agent State Machine</h2>
+                        </div>
+                        <div class="state-timeline">
+                            <div class="state-node" id="node-START">
+                                <div class="node-circle"></div>
+                                <div class="node-content">
+                                    <h3>Initialization</h3>
+                                    <p>Pre-flight snapshots & setup</p>
+                                </div>
+                            </div>
+                            <div class="state-node" id="node-AUDIT">
+                                <div class="node-circle"></div>
+                                <div class="node-content">
+                                    <h3>Lead Auditor</h3>
+                                    <p>AST parsing & vulnerability scans</p>
+                                </div>
+                            </div>
+                            <div class="state-node" id="node-PATCH">
+                                <div class="node-circle"></div>
+                                <div class="node-content">
+                                    <h3>Patch Developer</h3>
+                                    <p>Surgical Search-replace generation</p>
+                                </div>
+                            </div>
+                            <div class="state-node" id="node-TEST">
+                                <div class="node-circle"></div>
+                                <div class="node-content">
+                                    <h3>Sandbox Engineer</h3>
+                                    <p>Isolated test suite verification</p>
+                                </div>
+                            </div>
+                            <div class="state-node" id="node-COMMIT">
+                                <div class="node-circle"></div>
+                                <div class="node-content">
+                                    <h3>Git Manager</h3>
+                                    <p>PR deployment & branch merges</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </aside>
+
+                <!-- Right Side Pane: Code Diff and Logs Console -->
+                <div class="content-pane">
+                    <!-- Surgical Code Diff View -->
+                    <section class="workspace-card diff-card">
+                        <div class="card-title">
+                            <i class="fa-solid fa-code-compare"></i>
+                            <h2>Surgical Code Patch Diffs</h2>
+                        </div>
+                        <div class="diff-split-viewer">
+                            <!-- Left Pane: Original Code (Deletions) -->
+                            <div class="diff-pane diff-pane-original">
+                                <div class="pane-header">
+                                    <span class="pane-badge badge-deleted">CORAL ROSE (DELETION)</span>
+                                    <span class="pane-file" id="file-label-original">-</span>
+                                </div>
+                                <pre class="jetbrains-mono"><code id="code-original">Waiting for Patch Developer Agent generation...</code></pre>
+                            </div>
+                            <!-- Right Pane: Remediation Additions -->
+                            <div class="diff-pane diff-pane-patched">
+                                <div class="pane-header">
+                                    <span class="pane-badge badge-added">EMERALD MINT (ADDITION)</span>
+                                    <span class="pane-file" id="file-label-patched">+</span>
+                                </div>
+                                <pre class="jetbrains-mono"><code id="code-patched">Waiting for Patch Developer Agent generation...</code></pre>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Co-pilot Approval Gate Panel -->
+                    <section id="approval-card" class="workspace-card approval-card hidden">
+                        <div class="card-title approval-header">
+                            <div class="title-left">
+                                <i class="fa-solid fa-user-shield"></i>
+                                <h2>Human-in-the-Loop Approval Gate</h2>
+                            </div>
+                        </div>
+                        <p class="approval-desc">Qwen-Max generated patch successfully verified in isolated container sandbox. Awaiting developer decision to commit changes or rollback.</p>
+                        <div class="approval-actions">
+                            <button id="approve-btn" class="approve-btn">
+                                <i class="fa-solid fa-check"></i> Approve & Commit
+                            </button>
+                            <button id="reject-btn" class="reject-btn">
+                                <i class="fa-solid fa-xmark"></i> Reject & Rollback
+                            </button>
+                        </div>
+                    </section>
+
+                    <!-- Orchestration Console Terminal -->
+                    <section class="workspace-card console-card">
+                        <div class="card-title console-header">
+                            <div class="title-left">
+                                <i class="fa-solid fa-terminal"></i>
+                                <h2>Orchestration Console</h2>
+                            </div>
+                            <button id="clear-console-btn" class="console-clear" title="Clear console buffer">
+                                <i class="fa-solid fa-eraser"></i> CLEAR
+                            </button>
+                        </div>
+                        <div id="console-logs" class="console-buffer jetbrains-mono">
+                            <div class="log-line system-line">[SYSTEM] Console session active. Standing by.</div>
+                        </div>
+                    </section>
+                </div>
+
+            </div>
+        </main>
+    </div>
+    <script src="/app.js"></script>
+</body>
+</html>

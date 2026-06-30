@@ -17,3 +17,7 @@ Thumbs.db
 AGENTS.md
 CLAUDE.md
 GEMINI.md
+
+# Local environment variables
+.env
+

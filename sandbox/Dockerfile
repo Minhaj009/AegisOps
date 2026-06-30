@@ -1,24 +1,27 @@
-# AegisOps isolated security sandbox Dockerfile
-FROM python:3.10-slim-bullseye
+# AegisOps secure sandbox Dockerfile
+FROM python:3.10-slim
 
-# System setup
+# Install system build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     git \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Establish security boundaries
-# Create a non-privileged user 'sandbox_user'
-RUN groupadd -g 10001 sandbox_group && \
-    useradd -u 10001 -g sandbox_group -m -s /bin/bash sandbox_user
+# Install testing frameworks and libraries
+RUN pip install --no-cache-dir pytest pydantic
 
-# Set up sandbox operational directory
-WORKDIR /workspace
-RUN chown -R sandbox_user:sandbox_group /workspace
+# Create non-root execution user 'aegisrun'
+RUN groupadd -g 10001 aegisrun && \
+    useradd -u 10001 -g aegisrun -m -s /bin/bash aegisrun
 
-# Run as non-root user for security isolation
-USER sandbox_user
+# Establish workspace directory and verify ownership permissions
+WORKDIR /app
+RUN mkdir -p /app && chown -R aegisrun:aegisrun /app
 
-# Set default command to interactive shell or testing entrypoint
+# Switch to non-privileged user to maintain strict containment boundaries
+USER aegisrun
+
+# Default entrypoint
 CMD ["/bin/bash"]

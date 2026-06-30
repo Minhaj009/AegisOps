@@ -1,88 +1,58 @@
 {
   "mcpServers": {
-    "repo-parser": {
+    "aegisops-tools": {
       "command": "python",
-      "args": ["-m", "src.tools.mcp_server", "--server", "repo-parser"],
+      "args": ["-m", "src.tools.mcp_server"],
       "env": {},
       "tools": [
         {
-          "name": "parse_codebase_ast",
-          "description": "Parse codebase files and return the Abstract Syntax Tree (AST) structure, mapping imports, class definitions, and function declarations.",
+          "name": "get_repository_tree",
+          "description": "Recursively walk the repository, filtering for files matching targeted extensions (.py, .js, .cpp, .txt). Obeys .gitignore rules and returns a lightweight structural hierarchical tree map string.",
           "inputSchema": {
             "type": "object",
             "properties": {
-              "repo_path": {
+              "target_path": {
                 "type": "string",
-                "description": "Absolute path to the repository on the filesystem."
-              },
-              "target_extensions": {
-                "type": "array",
-                "items": { "type": "string" },
-                "default": [".py", ".js", ".java", ".go"],
-                "description": "File extensions to parse."
+                "description": "Absolute path to the repository directory to inspect."
               }
             },
-            "required": ["repo_path"]
+            "required": ["target_path"]
           }
-        }
-      ]
-    },
-    "vuln-scanner": {
-      "command": "python",
-      "args": ["-m", "src.tools.mcp_server", "--server", "vuln-scanner"],
-      "env": {},
-      "tools": [
+        },
         {
-          "name": "scan_vulnerabilities",
-          "description": "Scan codebase structure for known vulnerability signatures (CWE, OWASP Top 10) and unoptimized deployment anti-patterns.",
+          "name": "view_file_content",
+          "description": "Safely read a single targeted file path, with support for optional line-range slicing to return only the requested block.",
           "inputSchema": {
             "type": "object",
             "properties": {
-              "repo_path": {
+              "file_path": {
                 "type": "string",
-                "description": "Absolute path to the codebase directory."
+                "description": "Absolute path to the target file to view."
               },
-              "strictness_level": {
-                "type": "string",
-                "enum": ["low", "medium", "high"],
-                "default": "high"
+              "start_line": {
+                "type": "integer",
+                "description": "Optional start line number (1-indexed, inclusive) to begin slicing."
+              },
+              "end_line": {
+                "type": "integer",
+                "description": "Optional end line number (1-indexed, inclusive) to end slicing."
               }
             },
-            "required": ["repo_path"]
+            "required": ["file_path"]
           }
-        }
-      ]
-    },
-    "env-provisioner": {
-      "command": "python",
-      "args": ["-m", "src.tools.mcp_server", "--server", "env-provisioner"],
-      "env": {},
-      "tools": [
+        },
         {
-          "name": "provision_sandbox_container",
-          "description": "Provision an isolated container environment for running verification unit tests and reproducing exploits.",
+          "name": "flag_dependency_drift",
+          "description": "Read the target manifest file (requirements.txt), extract version strings, and format them for agent auditing.",
           "inputSchema": {
             "type": "object",
             "properties": {
-              "image_name": {
+              "manifest_path": {
                 "type": "string",
-                "default": "aegisops-sandbox:latest",
-                "description": "Docker image name to use."
-              },
-              "sandbox_id": {
-                "type": "string",
-                "description": "Unique identifier for the sandbox lifecycle."
-              },
-              "cpu_limit": {
-                "type": "string",
-                "default": "1.0"
-              },
-              "mem_limit": {
-                "type": "string",
-                "default": "512m"
+                "description": "Absolute path to the dependency manifest file."
               }
             },
-            "required": ["sandbox_id"]
+            "required": ["manifest_path"]
           }
         }
       ]

@@ -1,43 +1,37 @@
 {
-  "pipeline": {
-    "stages": [
-      {
-        "name": "Audit",
-        "sender": "System",
-        "processor": "LeadAuditorAgent",
-        "on_success": "Remediation",
-        "on_failure": "AbortPipeline"
-      },
-      {
-        "name": "Remediation",
-        "sender": "LeadAuditorAgent",
-        "processor": "PatchDeveloperAgent",
-        "on_success": "Verification",
-        "on_failure": "AbortPipeline"
-      },
-      {
-        "name": "Verification",
-        "sender": "PatchDeveloperAgent",
-        "processor": "SandboxEngineerAgent",
-        "on_success": "Deployment",
-        "on_failure": "RetryRemediation"
-      },
-      {
-        "name": "Deployment",
-        "sender": "SandboxEngineerAgent",
-        "processor": "GitManager",
-        "on_success": "SuccessPipeline",
-        "on_failure": "ManualReviewRequired"
-      }
-    ],
-    "thresholds": {
-      "consensus_agreement_pct": 100,
-      "max_verification_retries": 3,
-      "sandbox_timeout_seconds": 300
+  "states": [
+    "AUDIT",
+    "PATCH",
+    "TEST",
+    "COMMIT",
+    "ERROR"
+  ],
+  "transitions": {
+    "AUDIT": {
+      "on_success": "PATCH",
+      "on_failure": "ERROR"
     },
-    "retry_loop": {
-      "allow_developer_repatch": true,
-      "developer_repatch_limit": 2
+    "PATCH": {
+      "on_success": "TEST",
+      "on_failure": "ERROR"
+    },
+    "TEST": {
+      "on_success": "COMMIT",
+      "on_failure": "PATCH",
+      "on_error": "ERROR"
+    },
+    "COMMIT": {
+      "on_success": "COMPLETED",
+      "on_failure": "ERROR"
     }
-  }
+  },
+  "retry_thresholds": {
+    "max_patch_test_retries": 3,
+    "sandbox_timeout_seconds": 30
+  },
+  "consensus_criteria": {
+    "require_clean_tests": true,
+    "require_zero_exit_code": true
+  },
+  "enable_atomic_rollbacks": true
 }

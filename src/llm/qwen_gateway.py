@@ -7,11 +7,13 @@ API Grounding:
 """
 
 import os
-import time
 import logging
-from typing import Dict, Any, Generator, Optional
+import asyncio
+from http import HTTPStatus
+from typing import Dict, Any, Generator, Optional, List
+from dotenv import load_dotenv
 
-# Stub importing DashScope/Bailian. In actual runtime: import dashscope
+# Try importing DashScope
 try:
     import dashscope
 except ImportError:
@@ -20,95 +22,91 @@ except ImportError:
 logger = logging.getLogger("AegisOps.QwenGateway")
 
 class QwenGateway:
-    """Core interface wrapper for Alibaba Cloud Model Studio (Qwen-Max/Qwen-Plus)."""
+    """Core interface wrapper for Alibaba Cloud Model Studio (Qwen-Max/Qwen-Plus/Qwen-Flash)."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        # API key priority: argument -> env var
+    def __init__(self, api_key: Optional[str] = None) -> None:
+        # Load environment variables from .env
+        load_dotenv()
+
+        # Read DASHSCOPE_API_KEY. Throw an explicit, clear ValueError if missing.
         self.api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
         if not self.api_key:
-            logger.warning("DASHSCOPE_API_KEY environment variable is not set. Requests may fail.")
-        else:
-            if dashscope:
-                dashscope.api_key = self.api_key
+            raise ValueError(
+                "DASHSCOPE_API_KEY is missing from the active environment. "
+                "Ensure it is set in your environment variables or a local .env file."
+            )
 
-        # Standard model settings
-        self.default_model = "qwen-max"
-        self.max_retries = 3
-        self.retry_backoff = 2.0
+        # Apply to dashscope global config if available
+        if dashscope:
+            dashscope.api_key = self.api_key
+            dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
+
+        # Default model settings
+        self.default_model: str = "qwen-max"
 
     def generate_chat(self, 
                       system_prompt: str, 
                       user_prompt: str, 
                       model_name: Optional[str] = None, 
-                      temperature: float = 0.2, 
-                      stream: bool = False) -> Any:
+                      temperature: float = 0.2) -> str:
         """
-        Send a completion request to Qwen engine with robust error/retry limits.
+        Send a completion request to the Qwen engine synchronously.
         """
+        if not dashscope:
+            raise RuntimeError(
+                "DashScope SDK is not installed. Please run 'pip install -r requirements.txt'."
+            )
+
         model = model_name or self.default_model
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 
-        logger.info(f"Initiating completion with {model} (temp={temperature}, stream={stream})")
-
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                if dashscope is None:
-                    # Mock response for local development
-                    logger.debug("dashscope SDK not installed. Returning mocked completion.")
-                    return "Mocked response from Qwen-Max: AST analysis complete. Vulnerability resolved."
-
-                response = dashscope.Generation.call(
-                    model=model,
-                    messages=messages,
-                    result_format='message',
-                    temperature=temperature,
-                    stream=stream
-                )
-                
-                # Check for standard DashScope status codes
-                if response.status_code == 200:
-                    return response.output.choices[0].message.content
-                else:
-                    raise RuntimeError(f"Dashscope API Error [{response.code}]: {response.message}")
-
-            except Exception as e:
-                logger.warning(f"Qwen Gateway attempt {attempt}/{self.max_retries} failed: {str(e)}")
-                if attempt == self.max_retries:
-                    raise e
-                time.sleep(self.retry_backoff * attempt)
-
-    def generate_stream(self, 
-                        system_prompt: str, 
-                        user_prompt: str, 
-                        model_name: Optional[str] = None) -> Generator[str, None, None]:
-        """
-        Generate streaming responses from Qwen models.
-        """
-        model = model_name or self.default_model
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-
-        if dashscope is None:
-            yield "Mock stream chunk: resolving CWE..."
-            return
+        logger.info(f"Initiating completion with {model} (temp={temperature})")
 
         try:
-            responses = dashscope.Generation.call(
+            response = dashscope.Generation.call(
                 model=model,
                 messages=messages,
                 result_format='message',
-                stream=True
+                temperature=temperature,
+                api_key=self.api_key
             )
-            for response in responses:
-                if response.status_code == 200:
-                    yield response.output.choices[0].message.content
-                else:
-                    raise RuntimeError(f"Streaming Error: {response.message}")
+            
+            if response is None:
+                raise RuntimeError("DashScope API call returned None response.")
+
+            # Validate response status code using HTTPStatus enum
+            if response.status_code == HTTPStatus.OK:
+                try:
+                    return response.output.choices[0].message.content
+                except (AttributeError, IndexError) as e:
+                    raise RuntimeError(f"Unexpected response structure: {str(e)}") from e
+            else:
+                raise RuntimeError(
+                    f"DashScope API Error (Status: {response.status_code}, "
+                    f"Code: {getattr(response, 'code', 'N/A')}): "
+                    f"{getattr(response, 'message', 'No error details provided')}"
+                )
         except Exception as e:
-            logger.error(f"Streaming failed: {str(e)}")
-            raise e
+            logger.error(f"Sync generation call failed: {str(e)}")
+            if not isinstance(e, RuntimeError):
+                raise RuntimeError(f"DashScope invocation failed: {str(e)}") from e
+            raise
+
+    async def generate_remediation_async(self, 
+                                         system_prompt: str, 
+                                         user_prompt: str, 
+                                         model_name: Optional[str] = None, 
+                                         temperature: float = 0.2) -> str:
+        """
+        Send a completion request to the Qwen engine asynchronously using standard coroutines.
+        """
+        return await asyncio.to_thread(
+            self.generate_chat,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=model_name,
+            temperature=temperature
+        )
