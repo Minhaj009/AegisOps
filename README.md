@@ -21,20 +21,20 @@ AegisOps is built for the **Global AI Hackathon Series with Qwen Cloud**, target
 
 ```mermaid
 graph TD
-    User([User Target Repo]) -->|Input Cwd| Router[AegisOps Orchestration Router]
+    User(["User Target Repo"]) -->|Input Cwd| Router["AegisOps Orchestration Router"]
     
     subgraph AgentSociety ["Agent Society (Consensus Loop)"]
-        Router -->|Scan Codebase| Auditor[Lead Auditor Agent]
-        Auditor -->|Vulnerability Context| PatchDev[Patch Developer Agent (Qwen-Max)]
-        PatchDev -->|Proposed Diff| Sandbox[Sandbox Engineer Agent]
-        Sandbox -->|Docker Container Execution| RunTests[Exploit Validation / Unit Tests]
+        Router -->|Scan Codebase| Auditor["Lead Auditor Agent"]
+        Auditor -->|Vulnerability Context| PatchDev["Patch Developer Agent (Qwen-Max)"]
+        PatchDev -->|Proposed Diff| Sandbox["Sandbox Engineer Agent"]
+        Sandbox -->|Docker Container Execution| RunTests["Exploit Validation / Unit Tests"]
         RunTests -->|Success / Failure Logs| PatchDev
     end
     
-    Sandbox -->|Approved & Verified Patch| GitMgr[Git Manager Agent]
-    GitMgr -->|Commit & Push Merge Request| Repo[(Remote Repository)]
+    Sandbox -->|Approved & Verified Patch| GitMgr["Git Manager Agent"]
+    GitMgr -->|Commit & Push Merge Request| Repo[("Remote Repository")]
     
-    Router -->|Real-time Events via SSE| WebUI[Command Cockpit Dashboard]
+    Router -->|Real-time Events via SSE| WebUI["Command Cockpit Dashboard"]
 ```
 
 ---
