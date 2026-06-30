@@ -23,7 +23,7 @@ AegisOps is built for the **Global AI Hackathon Series with Qwen Cloud**, target
 graph TD
     User([User Target Repo]) -->|Input Cwd| Router[AegisOps Orchestration Router]
     
-    subgraph Agent Society (Consensus Loop)
+    subgraph AgentSociety ["Agent Society (Consensus Loop)"]
         Router -->|Scan Codebase| Auditor[Lead Auditor Agent]
         Auditor -->|Vulnerability Context| PatchDev[Patch Developer Agent (Qwen-Max)]
         PatchDev -->|Proposed Diff| Sandbox[Sandbox Engineer Agent]
@@ -48,41 +48,19 @@ graph TD
 
 ---
 
-## 📦 Getting Started
+## ☁️ Alibaba Cloud Proof of Deployment
 
-### Prerequisites
+AegisOps.dev is deployed and runs on **Alibaba Cloud Simple Application Server / ECS** in the **Indonesia (Jakarta) / Singapore** regions.
 
-*   Python 3.10+
-*   Alibaba Cloud Model Studio API Key (`DASHSCOPE_API_KEY`)
-*   Docker (optional, for Sandbox Engineer container verification)
+### Qwen Cloud API Integration
+The primary LLM gateway code is located in [`src/llm/qwen_gateway.py`](file:///f:/AegisOps/src/llm/qwen_gateway.py#L42) and is configured to route API calls directly to the international Model Studio endpoint:
+*   **Base URL**: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
 
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/AegisOps.git
-   cd AegisOps
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Configure environment variables in a `.env` file at the root:
-   ```env
-   DASHSCOPE_API_KEY=your_dashscope_api_key_here
-   ```
-
-### Running the Command Cockpit
-
-Start the HTTP server:
-```bash
-python src/orchestrator/server.py
-```
-
-Access the dashboard in your browser:
-**[http://localhost:8000](http://localhost:8000)**
+### Infrastructure Scaffolding
+Deployments are provisioned using the Terraform scripts provided in [`deploy/main.tf`](file:///f:/AegisOps/deploy/main.tf) to set up:
+*   VPC & Security Groups.
+*   ECS Instances running Docker.
+*   Alibaba Cloud Container Registry (ACR) to build and host the Sandbox Engineer's test suite execution containers (see [`deploy/push_to_acr.sh`](file:///f:/AegisOps/deploy/push_to_acr.sh)).
 
 ---
 
@@ -93,6 +71,7 @@ AegisOps demonstrates a highly structured multi-agent ecosystem. Each agent hold
 *   The **Auditor** is read-only.
 *   The **Developer** writes patches but cannot merge.
 *   The **Sandbox Engineer** validates but cannot edit.
+*   The **Interactive Co-pilot Gate** allows developers to approve or reject patches.
 They coordinate via a Pydantic-compliant message protocol, resolving code fixes through automated consensus loops.
 
 ### Track 4: Autopilot Agent

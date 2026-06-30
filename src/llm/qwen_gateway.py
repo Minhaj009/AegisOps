@@ -4,6 +4,7 @@ AegisOps Qwen LLM Gateway
 =========================
 API Grounding:
 * Core Inference (Model Studio / Qwen Engine API): https://www.alibabacloud.com/help/en/model-studio/developer-reference/
+* Qwen Cloud Base URL (Compatible Mode): https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 """
 
 import os
@@ -39,7 +40,9 @@ class QwenGateway:
         # Apply to dashscope global config if available
         if dashscope:
             dashscope.api_key = self.api_key
-            dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
+            # The SDK calls base endpoint: https://dashscope-intl.aliyuncs.com/api/v1
+            # Compatible with compatible-mode: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+            dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
         # Default model settings
         self.default_model: str = "qwen-max"
