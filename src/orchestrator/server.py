@@ -175,23 +175,32 @@ class DashboardHTTPHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Page not found")
 
 def clear_port(port: int) -> None:
-    """Finds and kills any processes listening on the specified port on Windows."""
+    """Finds and kills any processes listening on the specified port (cross-platform)."""
+    import platform
     try:
-        cmd = f"netstat -ano"
-        output = subprocess.check_output(cmd, shell=True).decode("utf-8")
-        pids = set()
-        for line in output.strip().split("\n"):
-            if "LISTENING" in line and f":{port}" in line:
-                parts = line.strip().split()
-                if len(parts) >= 5:
-                    pids.add(parts[-1])
-        
         my_pid = str(os.getpid())
-        for pid in pids:
-            if pid != my_pid and pid != "0":
-                logger.info(f"Port {port} is occupied by process {pid}. Terminating it...")
-                subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1) # wait for socket to release
+        if platform.system() == "Windows":
+            output = subprocess.check_output("netstat -ano", shell=True).decode("utf-8")
+            pids = set()
+            for line in output.strip().split("\n"):
+                if "LISTENING" in line and f":{port}" in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 5:
+                        pids.add(parts[-1])
+            for pid in pids:
+                if pid != my_pid and pid != "0":
+                    logger.info(f"Port {port} is occupied by process {pid}. Terminating it...")
+                    subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            # Linux/macOS: use fuser to find and kill
+            result = subprocess.run(f"fuser {port}/tcp", shell=True, capture_output=True, text=True)
+            pids = result.stdout.strip().split()
+            for pid in pids:
+                pid = pid.strip()
+                if pid and pid != my_pid:
+                    logger.info(f"Port {port} is occupied by process {pid}. Terminating it...")
+                    subprocess.run(f"kill -9 {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1)
     except Exception as e:
         logger.debug(f"Error checking/clearing port {port}: {str(e)}")
 
