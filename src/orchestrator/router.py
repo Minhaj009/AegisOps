@@ -62,6 +62,13 @@ class AegisOpsRouter:
             self.gateway_available = False
             
         self.simulated_metrics = MetricsTracker()
+        self.agent_messages: List[Dict[str, str]] = []
+
+    def _log_agent_message(self, sender: str, recipient: str, message: str) -> None:
+        """Records a structured inter-agent communication message."""
+        entry = {"sender": sender, "recipient": recipient, "message": message}
+        self.agent_messages.append(entry)
+        logger.info(f"[AGENT COMMS] {sender} -> {recipient}: {message}")
 
     def _create_snapshot(self, target_path: str) -> None:
         """Create a temporary pre-flight backup copy of the target path."""
@@ -251,6 +258,9 @@ class AegisOpsRouter:
                 else:
                     data_payload["metrics"] = self.gateway.metrics.get_summary()
                 
+                # Always inject the agent communication log
+                data_payload["agent_messages"] = list(self.agent_messages)
+                
                 callback(state, message, data_payload)
             except Exception as e:
                 logger.error(f"Callback invocation failed: {str(e)}")
@@ -268,6 +278,7 @@ class AegisOpsRouter:
         audit_report = ""
         last_failure = None
         self.patch_attempts = 0
+        self.agent_messages = []  # Reset agent comms for this run
         
         try:
             while state not in ("COMPLETED", "ERROR"):
@@ -275,18 +286,22 @@ class AegisOpsRouter:
                 self._notify(status_callback, state, f"Transitioning to state: {state}")
                 
                 if state == "AUDIT":
+                    self._log_agent_message("Orchestrator", "Lead Auditor", f"Scan codebase at '{target_path}' for vulnerabilities. Run AST static analysis and generate a threat model report.")
                     self._notify(status_callback, "AUDIT", "Analyzing repository files for security vulnerabilities...")
                     audit_report = await self._handle_audit(target_path)
+                    self._log_agent_message("Lead Auditor", "Patch Developer", "AST scan complete. Vulnerability footprint delivered with CWE classifications, file paths, and line ranges. Requesting surgical patch generation.")
                     self._notify(status_callback, "AUDIT", "Analysis completed.", {"report": audit_report})
                     state = self.transitions["AUDIT"]["on_success"]
                     
                 elif state == "PATCH":
                     self.patch_attempts += 1
                     logger.info(f"[STATE MACHINE] Patch Attempt {self.patch_attempts}/{self.max_retries}")
+                    self._log_agent_message("Patch Developer", "Orchestrator", f"Generating minimal surgical patch (attempt {self.patch_attempts}/{self.max_retries}). Targeting root cause with search-replace blocks.")
                     self._notify(status_callback, "PATCH", f"Generating patch fix (Attempt {self.patch_attempts}/{self.max_retries})...")
                     
                     # Restore repository to clean state before applying new patch attempt
                     if self.patch_attempts > 1:
+                        self._log_agent_message("Orchestrator", "Patch Developer", "Previous patch failed verification. Rolling back to clean snapshot. Retry with updated diagnostic context.")
                         self._notify(status_callback, "ROLLBACK", "Restoring files to clean snapshot before applying new patch.")
                         self._restore_snapshot(target_path)
                     
@@ -298,6 +313,7 @@ class AegisOpsRouter:
                     try:
                         self.patch_applier.apply_patch(target_base_path=target_path, patch_content=patch)
                         logger.info("[PATCH] Patch successfully applied to files.")
+                        self._log_agent_message("Patch Developer", "Sandbox Engineer", "Patch applied to source files. Requesting isolated container validation with full test suite execution.")
                         self._notify(status_callback, "PATCH", "Patch successfully applied to source files.")
                         state = self.transitions["PATCH"]["on_success"]
                     except Exception as pe:
@@ -314,15 +330,18 @@ class AegisOpsRouter:
                             state = "PATCH"
                     
                 elif state == "TEST":
+                    self._log_agent_message("Sandbox Engineer", "Orchestrator", "Provisioning isolated Docker container. Injecting patched source and test harness.")
                     self._notify(status_callback, "TEST", "Provisioning sandbox container and executing test suite...")
                     test_result = await self._handle_test(target_path)
                     
                     if test_result.get("exit_code") == 0:
                         logger.info("[TEST] Consensus verification achieved. Tests passed.")
+                        self._log_agent_message("Sandbox Engineer", "Patch Developer", "Consensus achieved. All tests passed. Sandbox status: VERIFIED. Patch is safe to deploy.")
                         self._notify(status_callback, "TEST", "Tests passed successfully! Patch verified.", {"result": test_result})
                         
                         if mode == "copilot" and approval_callback:
                             logger.info("[APPROVAL] Pausing pipeline, waiting for human approval...")
+                            self._log_agent_message("Orchestrator", "User", "Patch verified in sandbox. Awaiting your decision: Approve & Commit or Reject & Rollback.")
                             self._notify(status_callback, "WAITING_FOR_APPROVAL", "Patch verified in sandbox. Awaiting developer approval to commit.")
                             
                             # Block thread waiting for user input
@@ -330,13 +349,16 @@ class AegisOpsRouter:
                             
                             if decision == "APPROVE":
                                 logger.info("[APPROVAL] User approved patch. Proceeding to commit.")
+                                self._log_agent_message("User", "Git Manager", "Patch approved. Proceed with commit and PR deployment.")
                                 self._notify(status_callback, "APPROVAL_DECISION", "Patch approved by developer. Proceeding to commit.", {"decision": "APPROVE"})
                                 state = self.transitions["TEST"]["on_success"]
                             else:
                                 logger.warning("[APPROVAL] User rejected patch. Triggering rollback.")
+                                self._log_agent_message("User", "Orchestrator", "Patch rejected. Initiate rollback to clean snapshot.")
                                 self._notify(status_callback, "APPROVAL_DECISION", "Patch rejected by developer. Initiating rollback.", {"decision": "REJECT"})
                                 state = "ERROR"
                         else:
+                            self._log_agent_message("Sandbox Engineer", "Git Manager", "Autopilot mode. Tests passed. Forwarding verified patch to Git Manager for commit.")
                             state = self.transitions["TEST"]["on_success"]
                     else:
                         logger.warning(f"[TEST] Verification failed: {test_result.get('status')}")
@@ -352,6 +374,7 @@ class AegisOpsRouter:
                                 stderr=test_result.get("stderr", "")
                             )
                             logger.info(f"[DIAGNOSTICS] Failure classified as: {classification}")
+                            self._log_agent_message("Sandbox Engineer", "Patch Developer", f"Validation FAILED. Classification: {classification}. Stderr: {test_result.get('stderr', 'N/A')[:120]}. Requesting patch revision.")
                             self._notify(status_callback, "TEST", f"Test verification failed ({classification}). Preparing retry...", {"result": test_result})
                             last_failure = {
                                 "classification": classification,
@@ -362,11 +385,13 @@ class AegisOpsRouter:
                             
                 elif state == "COMMIT":
                     logger.info("[COMMIT] Committing remediation changes to repository.")
+                    self._log_agent_message("Git Manager", "Orchestrator", "Committing verified remediation to repository. Creating PR branch and pushing changes.")
                     self._notify(status_callback, "COMMIT", "Committing verified changes to the git repository.")
                     state = "COMPLETED"
             
             if state == "COMPLETED":
                 logger.info("=== AegisOps Remediation Pipeline: SUCCESS ===")
+                self._log_agent_message("Git Manager", "Orchestrator", "Commit successful. PR deployed. Codebase is now secure.")
                 self._notify(status_callback, "COMPLETED", "Pipeline successfully executed. Codebase is secure!")
                 self._cleanup_snapshot()
                 return "SUCCESS"

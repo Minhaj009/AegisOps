@@ -30,10 +30,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const approveBtn = document.getElementById("approve-btn");
     const rejectBtn = document.getElementById("reject-btn");
 
+    // Agent Society Communication Element
+    const communicationChat = document.getElementById("communication-chat");
+
     let eventSource = null;
     let timerInterval = null;
     let secondsElapsed = 0;
     let tokenCount = 0;
+    let lastRenderedMsgCount = 0;
+
+    // Agent metadata map: CSS class, avatar initials, and display name
+    const AGENT_META = {
+        "Lead Auditor":     { cls: "agent-lead-auditor",     initials: "LA", label: "Lead Auditor" },
+        "Patch Developer":  { cls: "agent-patch-developer",  initials: "PD", label: "Patch Developer" },
+        "Sandbox Engineer": { cls: "agent-sandbox-engineer", initials: "SE", label: "Sandbox Engineer" },
+        "Git Manager":      { cls: "agent-git-manager",      initials: "GM", label: "Git Manager" },
+        "Orchestrator":     { cls: "agent-orchestrator",     initials: "OR", label: "Orchestrator" },
+        "User":             { cls: "agent-user",             initials: "U",  label: "User" }
+    };
 
     // Helper to format large numbers with commas
     function formatNumber(num) {
@@ -100,6 +114,44 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const avgLat = metrics.average_latency_seconds || 0;
         if (diagAvgLatency) diagAvgLatency.innerText = `${avgLat.toFixed(2)}s`;
+    }
+
+    // Render Agent Society Communication Bubbles (incremental)
+    function renderAgentMessages(messages) {
+        if (!communicationChat || !messages || messages.length === 0) return;
+        
+        // Only render new messages since last render
+        if (messages.length <= lastRenderedMsgCount) return;
+        
+        // Clear empty state on first render
+        if (lastRenderedMsgCount === 0) {
+            communicationChat.innerHTML = "";
+        }
+        
+        const newMessages = messages.slice(lastRenderedMsgCount);
+        
+        newMessages.forEach(msg => {
+            const senderMeta = AGENT_META[msg.sender] || { cls: "agent-orchestrator", initials: "??", label: msg.sender };
+            const recipientMeta = AGENT_META[msg.recipient] || { cls: "", initials: "", label: msg.recipient };
+            
+            const bubble = document.createElement("div");
+            bubble.className = `chat-bubble ${senderMeta.cls}`;
+            bubble.innerHTML = `
+                <div class="bubble-avatar">${senderMeta.initials}</div>
+                <div class="bubble-body">
+                    <div class="bubble-header">
+                        <span class="bubble-sender">${senderMeta.label}</span>
+                        <span class="bubble-arrow">➜</span>
+                        <span class="bubble-recipient">${recipientMeta.label}</span>
+                    </div>
+                    <div class="bubble-content">${msg.message}</div>
+                </div>
+            `;
+            communicationChat.appendChild(bubble);
+        });
+        
+        lastRenderedMsgCount = messages.length;
+        communicationChat.scrollTop = communicationChat.scrollHeight;
     }
 
     // Helper to log text to our console view
@@ -205,6 +257,17 @@ document.addEventListener("DOMContentLoaded", () => {
         if (diagOutputTokens) diagOutputTokens.innerText = "0";
         if (diagAvgLatency) diagAvgLatency.innerText = "0.00s";
         
+        // Reset Agent Society Communication
+        lastRenderedMsgCount = 0;
+        if (communicationChat) {
+            communicationChat.innerHTML = `
+                <div class="comms-empty-state">
+                    <i class="fa-solid fa-satellite-dish"></i>
+                    <p>Establishing agent communication channel...</p>
+                </div>
+            `;
+        }
+        
         fileLabelOriginal.innerText = "-";
         fileLabelPatched.innerText = "+";
         codeOriginal.innerText = "Waiting for Patch Developer Agent generation...";
@@ -245,6 +308,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Update Telemetry Metrics from backend payload
                 if (data && data.metrics) {
                     updateMetricsHUD(data.metrics);
+                }
+
+                // Update Agent Society Communication
+                if (data && data.agent_messages) {
+                    renderAgentMessages(data.agent_messages);
                 }
 
                 // Update Telemetry Metrics & States
