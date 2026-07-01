@@ -9,8 +9,15 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Telemetry HUD Elements
     const hudTokens = document.getElementById("hud-tokens");
+    const hudCost = document.getElementById("hud-cost");
     const hudSandbox = document.getElementById("hud-sandbox");
     const hudRuntime = document.getElementById("hud-runtime");
+
+    // Session Diagnostics Elements
+    const diagCalls = document.getElementById("diag-calls");
+    const diagInputTokens = document.getElementById("diag-input-tokens");
+    const diagOutputTokens = document.getElementById("diag-output-tokens");
+    const diagAvgLatency = document.getElementById("diag-avg-latency");
 
     // Code Diff Elements
     const codeOriginal = document.getElementById("code-original");
@@ -74,6 +81,25 @@ document.addEventListener("DOMContentLoaded", () => {
             const mappedClass = stateClass.replace("status-", "state-").replace("state-off", "state-inactive");
             hudSandbox.classList.add(mappedClass);
         }
+    }
+
+    // Update Metrics and Costs in UI
+    function updateMetricsHUD(metrics) {
+        if (!metrics) return;
+        
+        const totalTokens = (metrics.total_input_tokens || 0) + (metrics.total_output_tokens || 0);
+        hudTokens.innerText = formatNumber(totalTokens);
+        
+        const cost = metrics.total_estimated_cost_usd || 0;
+        hudCost.innerText = `$${cost.toFixed(6)}`;
+        
+        // Update diagnostics sidebar card
+        if (diagCalls) diagCalls.innerText = metrics.total_calls || 0;
+        if (diagInputTokens) diagInputTokens.innerText = formatNumber(metrics.total_input_tokens || 0);
+        if (diagOutputTokens) diagOutputTokens.innerText = formatNumber(metrics.total_output_tokens || 0);
+        
+        const avgLat = metrics.average_latency_seconds || 0;
+        if (diagAvgLatency) diagAvgLatency.innerText = `${avgLat.toFixed(2)}s`;
     }
 
     // Helper to log text to our console view
@@ -172,6 +198,13 @@ document.addEventListener("DOMContentLoaded", () => {
         setTokenCount(0);
         setSandboxState("OFFLINE", "status-off");
         
+        // Reset diagnostics panel & HUD cost
+        if (hudCost) hudCost.innerText = "$0.000000";
+        if (diagCalls) diagCalls.innerText = "0";
+        if (diagInputTokens) diagInputTokens.innerText = "0";
+        if (diagOutputTokens) diagOutputTokens.innerText = "0";
+        if (diagAvgLatency) diagAvgLatency.innerText = "0.00s";
+        
         fileLabelOriginal.innerText = "-";
         fileLabelPatched.innerText = "+";
         codeOriginal.innerText = "Waiting for Patch Developer Agent generation...";
@@ -208,6 +241,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 else if (state === "ROLLBACK") logType = "warn";
                 
                 logToConsole(message, logType);
+
+                // Update Telemetry Metrics from backend payload
+                if (data && data.metrics) {
+                    updateMetricsHUD(data.metrics);
+                }
 
                 // Update Telemetry Metrics & States
                 if (state === "START") {

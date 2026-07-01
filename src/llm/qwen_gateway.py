@@ -8,11 +8,14 @@ API Grounding:
 """
 
 import os
+import time
 import logging
 import asyncio
 from http import HTTPStatus
 from typing import Dict, Any, Generator, Optional, List
 from dotenv import load_dotenv
+from src.observability.metrics_tracker import MetricsTracker
+
 
 # Try importing DashScope
 try:
@@ -46,6 +49,7 @@ class QwenGateway:
 
         # Default model settings
         self.default_model: str = "qwen-max"
+        self.metrics = MetricsTracker()
 
     def generate_chat(self, 
                       system_prompt: str, 
@@ -68,6 +72,7 @@ class QwenGateway:
 
         logger.info(f"Initiating completion with {model} (temp={temperature})")
 
+        start_time = time.perf_counter()
         try:
             response = dashscope.Generation.call(
                 model=model,
@@ -76,6 +81,7 @@ class QwenGateway:
                 temperature=temperature,
                 api_key=self.api_key
             )
+            latency = time.perf_counter() - start_time
             
             if response is None:
                 raise RuntimeError("DashScope API call returned None response.")
@@ -83,6 +89,14 @@ class QwenGateway:
             # Validate response status code using HTTPStatus enum
             if response.status_code == HTTPStatus.OK:
                 try:
+                    # Extract usage metadata
+                    input_tokens = 0
+                    output_tokens = 0
+                    if hasattr(response, 'usage') and response.usage:
+                        input_tokens = getattr(response.usage, 'input_tokens', 0)
+                        output_tokens = getattr(response.usage, 'output_tokens', 0)
+                    
+                    self.metrics.record_call(model, input_tokens, output_tokens, latency)
                     return response.output.choices[0].message.content
                 except (AttributeError, IndexError) as e:
                     raise RuntimeError(f"Unexpected response structure: {str(e)}") from e

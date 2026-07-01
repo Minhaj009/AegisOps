@@ -36,6 +36,11 @@
             </div>
             <div class="telemetry-divider"></div>
             <div class="telemetry-item">
+                <span class="item-title">ESTIMATED COST (USD)</span>
+                <span id="hud-cost" class="item-value">$0.000000</span>
+            </div>
+            <div class="telemetry-divider"></div>
+            <div class="telemetry-item">
                 <span class="item-title">SANDBOX STATE (ISOLATED)</span>
                 <span id="hud-sandbox" class="item-value state-inactive">OFFLINE</span>
             </div>
@@ -121,6 +126,32 @@
                                     <h3>Git Manager</h3>
                                     <p>PR deployment & branch merges</p>
                                 </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Session Diagnostics Card -->
+                    <section class="workspace-card diagnostics-card">
+                        <div class="card-title diagnostics-header">
+                            <i class="fa-solid fa-chart-line"></i>
+                            <h2>Session Diagnostics</h2>
+                        </div>
+                        <div class="diagnostics-metrics">
+                            <div class="metric-row">
+                                <span class="metric-label">Model Studio Calls:</span>
+                                <span id="diag-calls" class="metric-val jetbrains-mono">0</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="metric-label">Input Tokens:</span>
+                                <span id="diag-input-tokens" class="metric-val jetbrains-mono">0</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="metric-label">Output Tokens:</span>
+                                <span id="diag-output-tokens" class="metric-val jetbrains-mono">0</span>
+                            </div>
+                            <div class="metric-row">
+                                <span class="metric-label">Average Latency:</span>
+                                <span id="diag-avg-latency" class="metric-val jetbrains-mono">0.00s</span>
                             </div>
                         </div>
                     </section>

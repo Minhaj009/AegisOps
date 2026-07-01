@@ -648,3 +648,40 @@ body {
     0%, 100% { border-color: var(--accent-brand); }
     50% { border-color: rgba(79, 70, 229, 0.3); }
 }
+
+/* Session Diagnostics Metrics Card */
+.diagnostics-card {
+    margin-top: 16px;
+}
+
+.diagnostics-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #e2e8f0;
+}
+
+.metric-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.metric-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.metric-val {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}

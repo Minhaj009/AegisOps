@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Optional
 from src.llm.qwen_gateway import QwenGateway
 from sandbox.env_manager import SandboxManager
 from src.orchestrator.patch_applier import PatchApplier
+from src.observability.metrics_tracker import MetricsTracker
 
 logger = logging.getLogger("AegisOps.Router")
 
@@ -59,6 +60,8 @@ class AegisOpsRouter:
             logger.warning(f"QwenGateway not available due to config: {str(ve)}. Running in simulation mode.")
             self.gateway = None
             self.gateway_available = False
+            
+        self.simulated_metrics = MetricsTracker()
 
     def _create_snapshot(self, target_path: str) -> None:
         """Create a temporary pre-flight backup copy of the target path."""
@@ -132,9 +135,28 @@ class AegisOpsRouter:
 
     async def _handle_audit(self, target_path: str) -> str:
         """Hook point for LeadAuditor system interaction."""
-        logger.info("[AUDIT] Launching LeadAuditor audit routine...")
-        system_prompt = "You are the Lead Auditor Agent. Scan codebase and find vulnerability footprints."
-        user_prompt = f"Audit the codebase located at: {target_path}"
+        logger.info("[AUDIT] Launching LeadAuditor AST-based static scan...")
+        
+        # 1. Run local AST static scan to ground findings
+        try:
+            from src.orchestrator.ast_scanner import ASTScanner
+            scanner = ASTScanner(target_path)
+            ast_findings = scanner.generate_markdown_report()
+            logger.info(f"[AST SCANNER] Findings report generated:\n{ast_findings}")
+        except Exception as ae:
+            logger.error(f"[AST SCANNER] Failed to execute: {str(ae)}")
+            ast_findings = "Lead Auditor AST Scan: Encountered error during parsing."
+
+        # 2. Pass findings to Qwen-Max to synthesize remediation footprint
+        system_prompt = (
+            "You are the Lead Auditor Agent. Analyze the codebase files and the provided "
+            "static analysis tool AST report. Verify the vulnerabilities, and output a "
+            "clear, consolidated threat model report containing the vulnerability footprint."
+        )
+        user_prompt = (
+            f"Codebase Target Path: {target_path}\n\n"
+            f"AST Scanner Findings Report:\n{ast_findings}"
+        )
         
         if self.gateway_available and self.gateway:
             try:
@@ -144,9 +166,9 @@ class AegisOpsRouter:
                 )
                 return report
             except Exception as e:
-                logger.error(f"[AUDIT] LLM call failed: {str(e)}. Falling back to mock.")
+                logger.error(f"[AUDIT] LLM call failed: {str(e)}. Falling back to local AST report.")
                 
-        return "Vulnerability footprint detected: shell injection in entrypoint script (CWE-78)."
+        return ast_findings
 
     async def _handle_patch(self, audit_report: str, failure_feedback: Optional[Dict[str, str]] = None) -> str:
         """Hook point for PatchDeveloper system interaction."""
@@ -212,10 +234,24 @@ class AegisOpsRouter:
                 }
 
     def _notify(self, callback, state: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
-        """Invokes the progress callback if defined."""
+        """Invokes the progress callback if defined and injects metrics summary."""
         if callback:
             try:
-                callback(state, message, data or {})
+                data_payload = dict(data or {})
+                
+                # In simulation mode, record mock calls if we enter states
+                if not (self.gateway_available and self.gateway):
+                    msg_lower = message.lower()
+                    if state == "AUDIT" and "completed" in msg_lower:
+                        self.simulated_metrics.record_call("qwen-max", 4500, 1250, 2.45)
+                    elif state == "PATCH" and "applied" in msg_lower:
+                        self.simulated_metrics.record_call("qwen-max", 3800, 1400, 1.95)
+                    
+                    data_payload["metrics"] = self.simulated_metrics.get_summary()
+                else:
+                    data_payload["metrics"] = self.gateway.metrics.get_summary()
+                
+                callback(state, message, data_payload)
             except Exception as e:
                 logger.error(f"Callback invocation failed: {str(e)}")
 
