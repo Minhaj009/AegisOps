@@ -25,15 +25,15 @@ Security vulnerabilities in software repositories are discovered faster than dev
 
 | Feature | Description |
 |---|---|
-| **🔍 Hybrid AST Static Scanner** | Python `ast`-based vulnerability detector that identifies CWE-78 (Command Injection), CWE-89 (SQL Injection), CWE-94 (Insecure Eval), CWE-502 (Pickle Deserialization), and CWE-798 (Hardcoded Credentials) with exact file paths and line numbers. |
+| **⚡ Smart Ingestion Engine (v1.2)** | **Option B Production-Grade Crawler**: Includes framework manifest detection, snippet windowing, overlap block merging, Shannon Entropy secret auditing, and import-graph tracking to support large codebases. |
+| **🧠 Live Agent Thoughts Card** | Collapsible terminal interface displaying real-time Qwen-Max internal chain-of-thought analysis, planning, and step-by-step reasoning. |
 | **🤖 4-Agent Consensus Loop** | Lead Auditor → Patch Developer → Sandbox Engineer → Git Manager collaborate through structured message passing with automatic retry logic (up to 3 attempts). |
-| **💬 Agent Society Communication** | Real-time visual chat timeline showing inter-agent negotiations with color-coded speech bubbles, directional arrows, and slide-in animations. |
+| **🔀 Fuzzy Patch Applier** | Spacing-insensitive, line-ending normalized patch system that uses dynamic regex matching to resolve formatting discrepancies (like CRLF vs LF and split-line parameters). |
+| **📦 GitHub Cloner & ZIP Downloads** | Allows direct scanning of remote repositories on Alibaba Cloud, and packages all modified files into a downloadable ZIP archive. |
 | **🧪 Docker Sandbox Isolation** | Patches are validated inside short-lived, isolated Docker containers before any code is committed — preventing untested changes from reaching production. |
 | **👨‍✈️ Co-pilot Mode** | Human-in-the-loop approval gate that pauses the pipeline after sandbox verification, letting developers approve or reject patches before commit. |
 | **📊 Session Diagnostics** | Real-time token counter, USD cost tracker (based on Qwen-Max pricing), and latency metrics streamed live to the dashboard via SSE. |
-| **🔀 Surgical Diff Viewer** | Side-by-side code diff panel with Coral Rose (deletions) and Emerald Mint (additions) highlighting, synchronized height observers, and JetBrains Mono typography. |
 | **⏪ Atomic Rollback** | Pre-flight snapshots of the target codebase enable instant rollback if any patch fails verification. |
-| **🛠️ MCP Tool Server** | Custom Model Context Protocol server exposing `scan_codebase`, `apply_patch`, and `run_sandbox_test` as structured tool endpoints. |
 
 ---
 
@@ -65,12 +65,12 @@ graph TD
 | Layer | Technology |
 |---|---|
 | **LLM Engine** | [Qwen-Max](https://www.alibabacloud.com/help/en/model-studio/) via Alibaba Cloud Model Studio and `dashscope` SDK |
-| **Base URL** | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| **Base API URL** | `https://dashscope-intl.aliyuncs.com/api/v1` (Compatible Mode SDK Endpoint) |
 | **Orchestration** | Asynchronous Python 3.10+ with `asyncio` state machine and multi-threaded pipeline |
-| **Static Analysis** | Custom `ast`-based scanner using Python standard library (zero external dependencies) |
+| **Ingestion Engine** | Custom risk-prioritized file crawler, Shannon Entropy secret scanner, and dependency-graph resolver |
+| **Patch Applier** | Custom spacing-insensitive, CRLF-normalized fuzzy matching engine |
 | **Sandbox** | Docker containers provisioned via `sandbox/env_manager.py` |
 | **Dashboard** | Vanilla HTML/CSS/JS with SSE streaming, JetBrains Mono + Inter typography |
-| **Observability** | `metrics_tracker.py` — token counting, USD cost calculation, latency tracking |
 | **Infrastructure** | Terraform (ECS + VPC + ACR), one-command deployment script |
 
 ---

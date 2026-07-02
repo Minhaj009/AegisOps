@@ -842,3 +842,157 @@ body {
 .agent-user .bubble-avatar { background-color: #b45309; }
 .agent-user .bubble-sender { color: #b45309; }
 .agent-user .bubble-content { background-color: #fffbeb; color: #78350f; border: 1px solid #fde68a; }
+
+/* Git Clone & Remediated File Download Elements */
+.diff-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.diff-card-header .title-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--status-success);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--border-radius-crisp);
+    padding: 6px 14px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.download-btn:hover:not(:disabled) {
+    background-color: #059669;
+    transform: scale(1.03);
+    box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
+}
+
+.download-btn:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.download-btn:disabled {
+    background-color: var(--status-idle);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    box-shadow: none;
+    opacity: 0.5;
+}
+
+.download-btn.hidden {
+    display: none !important;
+}
+
+/* Collapsible Reasoning Card */
+.reasoning-card {
+    background-color: var(--bg-console) !important;
+    border: 1px solid #1e293b !important;
+    color: #e2e8f0;
+}
+
+.reasoning-header {
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid #1e293b;
+    padding-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.reasoning-header h2 {
+    color: #f8fafc !important;
+}
+
+.reasoning-header i {
+    color: #f59e0b; /* Amber bulb */
+}
+
+.reasoning-toggle-icon {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapsible-card.collapsed .reasoning-toggle-icon {
+    transform: rotate(0deg);
+}
+
+.collapsible-card:not(.collapsed) .reasoning-toggle-icon {
+    transform: rotate(180deg);
+}
+
+.reasoning-content-wrapper {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapsible-card:not(.collapsed) .reasoning-content-wrapper {
+    max-height: 400px;
+}
+
+.reasoning-buffer {
+    font-size: 0.82rem;
+    line-height: 1.6;
+    padding: 16px 0;
+    max-height: 380px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: #cbd5e1;
+    scrollbar-width: thin;
+    scrollbar-color: #334155 #0f172a;
+}
+
+.reasoning-placeholder {
+    color: #64748b;
+    font-style: italic;
+}
+
+.reasoning-text-line {
+    color: #f1f5f9;
+}
+
+/* Cloud Status Badges */
+.cloud-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 8px;
+}
+
+.studio-badge {
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    color: #a78bfa;
+}
+
+.ecs-badge {
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.25);
+    color: #38bdf8;
+}
+
+.nav-status {
+    background-color: transparent !important;
+    padding: 0 !important;
+}
+

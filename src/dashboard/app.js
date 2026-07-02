@@ -30,6 +30,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const approveBtn = document.getElementById("approve-btn");
     const rejectBtn = document.getElementById("reject-btn");
 
+    // Download DOM Element
+    const downloadBtn = document.getElementById("download-btn");
+
+    // Agent Reasoning Box Elements
+    const reasoningBox = document.getElementById("reasoning-box");
+    const reasoningCard = document.querySelector(".reasoning-card");
+    const reasoningToggleIcon = document.getElementById("reasoning-toggle");
+
     // Agent Society Communication Element
     const communicationChat = document.getElementById("communication-chat");
 
@@ -38,6 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let secondsElapsed = 0;
     let tokenCount = 0;
     let lastRenderedMsgCount = 0;
+    let activeRunId = null;
 
     // Agent metadata map: CSS class, avatar initials, and display name
     const AGENT_META = {
@@ -249,6 +258,9 @@ document.addEventListener("DOMContentLoaded", () => {
         startTimer();
         setTokenCount(0);
         setSandboxState("OFFLINE", "status-off");
+        activeRunId = null;
+        downloadBtn.classList.add("hidden");
+        downloadBtn.disabled = true;
         
         // Reset diagnostics panel & HUD cost
         if (hudCost) hudCost.innerText = "$0.000000";
@@ -266,6 +278,19 @@ document.addEventListener("DOMContentLoaded", () => {
                     <p>Establishing agent communication channel...</p>
                 </div>
             `;
+        }
+
+        // Reset Agent Reasoning Box
+        if (reasoningBox) {
+            reasoningBox.innerHTML = `
+                <span class="reasoning-placeholder">No active thoughts. Run a scan to see real-time Qwen-Max chain-of-thought analysis.</span>
+            `;
+            if (reasoningCard) {
+                reasoningCard.classList.add("collapsed");
+                if (reasoningToggleIcon) {
+                    reasoningToggleIcon.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+                }
+            }
         }
         
         fileLabelOriginal.innerText = "-";
@@ -315,11 +340,19 @@ document.addEventListener("DOMContentLoaded", () => {
                     renderAgentMessages(data.agent_messages);
                 }
 
+                // Update Agent Thought Logs
+                if (data && data.thought) {
+                    renderAgentThought(data.thought, state);
+                }
+
                 // Update Telemetry Metrics & States
                 if (state === "START") {
                     updateTimeline("START");
                     setTokenCount(1500); // initial schema ingestion tokens
                     setSandboxState("OFFLINE", "status-off");
+                    if (data && data.run_id) {
+                        activeRunId = data.run_id;
+                    }
                 } 
                 else if (state === "SNAPSHOT") {
                     setTokenCount(tokenCount + 300);
@@ -377,6 +410,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         node.classList.remove("active");
                         node.classList.add("complete");
                     });
+                    if (activeRunId) {
+                        downloadBtn.classList.remove("hidden");
+                        downloadBtn.disabled = false;
+                    }
                     cleanupConnection();
                 } 
                 else if (state === "ERROR") {
@@ -435,6 +472,14 @@ document.addEventListener("DOMContentLoaded", () => {
             });
     });
 
+    // Download Button Event Listener
+    downloadBtn.addEventListener("click", () => {
+        if (activeRunId) {
+            logToConsole("Initiating download for remediated patch archive...", "info");
+            window.location.href = `/api/download?run_id=${activeRunId}`;
+        }
+    });
+
     function cleanupConnection() {
         if (eventSource) {
             eventSource.close();
@@ -445,6 +490,60 @@ document.addEventListener("DOMContentLoaded", () => {
         submitBtn.querySelector(".btn-text").innerText = "Execute Remediation Pipeline";
         approvalCard.classList.add("hidden");
     }
+
+    function renderAgentThought(thought, state) {
+        if (!reasoningBox || !thought) return;
+        
+        // Remove empty state placeholder
+        const placeholder = reasoningBox.querySelector(".reasoning-placeholder");
+        if (placeholder) {
+            reasoningBox.innerHTML = "";
+        }
+        
+        // Formulate a beautiful block with timestamp
+        const now = new Date().toLocaleTimeString();
+        const stateLabel = state === "AUDIT" ? "Lead Auditor" : "Patch Developer";
+        const themeColor = state === "AUDIT" ? "#a78bfa" : "#f59e0b"; // purple vs amber
+        
+        const thoughtBlock = document.createElement("div");
+        thoughtBlock.className = "reasoning-block";
+        thoughtBlock.style.borderLeft = `3px solid ${themeColor}`;
+        thoughtBlock.style.paddingLeft = "10px";
+        thoughtBlock.style.marginBottom = "16px";
+        thoughtBlock.style.animation = "fadeIn 0.3s ease";
+        
+        thoughtBlock.innerHTML = `
+            <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">
+                [${now}] <span style="color: ${themeColor}">${stateLabel.toUpperCase()} THOUGHTS</span>
+            </div>
+            <div style="color: #cbd5e1; white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">${thought}</div>
+        `;
+        
+        reasoningBox.appendChild(thoughtBlock);
+        reasoningBox.scrollTop = reasoningBox.scrollHeight;
+        
+        // Auto expand card when a thought is printed!
+        if (reasoningCard && reasoningCard.classList.contains("collapsed")) {
+            reasoningCard.classList.remove("collapsed");
+            if (reasoningToggleIcon) {
+                reasoningToggleIcon.innerHTML = '<i class="fa-solid fa-chevron-up"></i>';
+            }
+        }
+    }
+
+    window.toggleReasoning = function() {
+        const card = document.querySelector(".reasoning-card");
+        const icon = document.getElementById("reasoning-toggle");
+        if (card) {
+            if (card.classList.contains("collapsed")) {
+                card.classList.remove("collapsed");
+                if (icon) icon.innerHTML = '<i class="fa-solid fa-chevron-up"></i>';
+            } else {
+                card.classList.add("collapsed");
+                if (icon) icon.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+            }
+        }
+    };
 
     // Synchronize diff pane heights
     const originalPane = document.querySelector('.diff-pane-original');

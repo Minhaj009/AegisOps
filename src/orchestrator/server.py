@@ -17,6 +17,9 @@ import asyncio
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import subprocess
 import time
+import uuid
+import zipfile
+import tempfile
 from typing import Dict, Any, Optional
 
 # Add workspace path to system path
@@ -31,6 +34,11 @@ DASHBOARD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "d
 
 approval_event = threading.Event()
 approval_decision = None
+
+# Active runs registry
+# Maps run_id -> {"target_path": str, "modified_files": List[str], "clone_path": Optional[str]}
+active_runs = {}
+
 
 def request_approval_callback() -> str:
     global approval_decision
@@ -91,29 +99,82 @@ class DashboardHTTPHandler(BaseHTTPRequestHandler):
             
             logger.info(f"Triggering remediation pipeline via SSE for: {target_path} (mode={mode})")
             
+            # Generate run_id and register the run
+            run_id = str(uuid.uuid4())
+            active_runs[run_id] = {
+                "target_path": target_path,
+                "clone_path": None,
+                "modified_files": []
+            }
+            
             # Queue to stream events from the pipeline thread to the handler thread
             event_queue = queue.Queue()
             
             # Status callback to put events into the queue
             def status_callback(state: str, message: str, data: Dict[str, Any]) -> None:
+                merged_data = dict(data or {})
+                merged_data["run_id"] = run_id
                 event_queue.put({
                     "state": state,
                     "message": message,
-                    "data": data
+                    "data": merged_data
                 })
+                
+            # Send initial run_id event to the client
+            event_queue.put({
+                "state": "START",
+                "message": f"Initializing pipeline execution session. Run ID: {run_id}",
+                "data": {"run_id": run_id}
+            })
                 
             # Target running function in separate thread
             def pipeline_thread_worker():
+                nonlocal target_path
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 router = AegisOpsRouter()
+                
+                clone_path = None
+                is_git = target_path.startswith("http://") or target_path.startswith("https://") or target_path.startswith("git@")
+                
                 try:
-                    loop.run_until_complete(router.run_pipeline(
+                    if is_git:
+                        # Extract repo name
+                        repo_name = target_path.split("/")[-1].replace(".git", "")
+                        if not repo_name:
+                            repo_name = "cloned_repo"
+                        
+                        clone_dir = os.path.abspath(os.path.join(os.getcwd(), "clones"))
+                        os.makedirs(clone_dir, exist_ok=True)
+                        clone_path = os.path.join(clone_dir, f"{repo_name}_{run_id[:8]}")
+                        
+                        logger.info(f"Cloning Git repository: {target_path} -> {clone_path}")
+                        status_callback("START", f"Cloning remote Git repository: '{target_path}'...", {})
+                        
+                        res = subprocess.run(["git", "clone", target_path, clone_path], capture_output=True, text=True)
+                        if res.returncode != 0:
+                            logger.error(f"Git clone failed: {res.stderr}")
+                            status_callback("ERROR", f"Git clone failed: {res.stderr}", {})
+                            return
+                        
+                        # Set active target_path to the local cloned copy
+                        target_path = clone_path
+                        active_runs[run_id]["clone_path"] = clone_path
+                        active_runs[run_id]["target_path"] = clone_path
+                        
+                    status_callback("START", f"Starting AegisOps state-machine loop on {target_path}...", {})
+                    
+                    status, modified_files = loop.run_until_complete(router.run_pipeline(
                         target_path=target_path,
                         status_callback=status_callback,
                         mode=mode,
                         approval_callback=request_approval_callback
                     ))
+                    
+                    if status == "SUCCESS":
+                        active_runs[run_id]["modified_files"] = modified_files
+                        logger.info(f"Run {run_id} completed successfully. Modified files: {modified_files}")
+                    
                 except Exception as ex:
                     logger.error(f"Pipeline crashed: {str(ex)}")
                     status_callback("ERROR", f"Orchestrator Exception: {str(ex)}", {})
@@ -139,6 +200,68 @@ class DashboardHTTPHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     logger.error(f"Error streaming event: {str(e)}")
                     break
+            return
+            
+        # 1.2 API: Download Remediated Files as ZIP
+        elif path == "/api/download":
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            run_id = query_params.get("run_id", [""])[0]
+            
+            if not run_id or run_id not in active_runs:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Run ID '{run_id}' not found or has no active remediation."}).encode("utf-8"))
+                return
+                
+            run_info = active_runs[run_id]
+            modified_files = run_info.get("modified_files", [])
+            target_path = run_info.get("target_path", "")
+            
+            if not modified_files:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "No modified files available for download in this session."}).encode("utf-8"))
+                return
+                
+            try:
+                # Create a temporary file for the ZIP archive
+                fd, temp_zip_path = tempfile.mkstemp(suffix=".zip")
+                os.close(fd)
+                
+                with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for filepath in modified_files:
+                        if os.path.exists(filepath):
+                            # Store with relative path from target_path (to preserve folder structure)
+                            rel_path = os.path.relpath(filepath, target_path)
+                            zipf.write(filepath, rel_path)
+                
+                # Read the zip content
+                with open(temp_zip_path, 'rb') as f:
+                    zip_data = f.read()
+                
+                # Clean up temporary ZIP file
+                try:
+                    os.remove(temp_zip_path)
+                except Exception:
+                    pass
+                
+                # Send the response
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f"attachment; filename=aegisops_remediation_{run_id[:8]}.zip")
+                self.send_header("Content-Length", str(len(zip_data)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(zip_data)
+                
+            except Exception as e:
+                logger.error(f"Failed to generate download ZIP: {str(e)}")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Failed to generate download archive: {str(e)}"}).encode("utf-8"))
             return
             
         # 1.5 API: Interactive Co-Pilot Gates

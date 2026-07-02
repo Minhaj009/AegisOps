@@ -42,7 +42,7 @@ resource "alicloud_vswitch" "vswitch" {
   vswitch_name = "aegisops-vswitch"
   vpc_id       = alicloud_vpc.vpc.id
   cidr_block   = "10.0.1.0/24"
-  zone_id      = "${var.region}-a"
+  zone_id      = "${var.region}-b"
 }
 
 # 2. Security Group Configuration
@@ -92,7 +92,7 @@ resource "alicloud_cr_repo" "acr_repo" {
 
 # 4. Elastic Compute Service (ECS) Instance
 resource "alicloud_instance" "orchestrator" {
-  availability_zone    = "${var.region}-a"
+  availability_zone    = "${var.region}-b"
   instance_name        = "aegisops-orchestrator"
   image_id             = "ubuntu_22_04_x64_20G_alibase_20230613.vhd" # Ubuntu LTS
   instance_type        = var.ecs_instance_type

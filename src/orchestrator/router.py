@@ -13,7 +13,7 @@ import uuid
 import shutil
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from src.llm.qwen_gateway import QwenGateway
 from sandbox.env_manager import SandboxManager
 from src.orchestrator.patch_applier import PatchApplier
@@ -50,6 +50,7 @@ class AegisOpsRouter:
         self.patch_applier = PatchApplier()
         self.backup_path: Optional[str] = None
         self.patch_attempts = 0
+        self.modified_files: List[str] = []
 
         # Initialize LLM QwenGateway
         try:
@@ -81,7 +82,8 @@ class AegisOpsRouter:
         try:
             if os.path.exists(self.backup_path):
                 shutil.rmtree(self.backup_path)
-            shutil.copytree(target_path, self.backup_path)
+            # Ignore the local .git directory to speed up backups and avoid access lock issues
+            shutil.copytree(target_path, self.backup_path, ignore=shutil.ignore_patterns(".git"))
         except Exception as e:
             logger.error(f"[SNAPSHOT] Pre-flight backup creation failed: {str(e)}")
             raise RuntimeError(f"Backup snapshot creation failed: {str(e)}") from e
@@ -110,6 +112,9 @@ class AegisOpsRouter:
 
             # Restore files from backup
             for entry in os.listdir(self.backup_path):
+                # Skip version control and instruction files during restore
+                if entry in (".git", ".agents", "CLAUDE.md", "GEMINI.md", "AGENTS.md"):
+                    continue
                 src = os.path.join(self.backup_path, entry)
                 dst = os.path.join(target_path, entry)
                 if os.path.isdir(src):
@@ -140,6 +145,267 @@ class AegisOpsRouter:
             return "Compilation/Syntax Error"
         return "Test Logic Failure"
 
+    def _calculate_shannon_entropy(self, text: str) -> float:
+        """Calculates the Shannon entropy of a string to identify random keys/secrets."""
+        import math
+        if not text:
+            return 0.0
+        entropy = 0.0
+        unique_chars = set(text)
+        for char in unique_chars:
+            p = text.count(char) / len(text)
+            entropy -= p * math.log2(p)
+        return entropy
+
+    def _detect_secrets(self, content: str) -> List[Tuple[int, str, float]]:
+        """Scans content for high-entropy strings (passwords, keys) and returns (lineno, match, entropy)."""
+        import re
+        # Match quoted string literals (single/double quotes) of length 16 to 80
+        quoted_strings = re.findall(r"['\"]([a-zA-Z0-9\-_=+/]{16,80})['\"]", content)
+        findings = []
+        
+        for match in quoted_strings:
+            entropy = self._calculate_shannon_entropy(match)
+            # High entropy (>4.2) indicates high randomness (like an API key, DB password, base64 hash)
+            # Exclude typical placeholder words to avoid false positives
+            if entropy > 4.2 and not any(term in match.lower() for term in ("placeholder", "example", "username", "password", "test", "dummy")):
+                # Find line number
+                for idx, line in enumerate(content.splitlines(), 1):
+                    if match in line:
+                        findings.append((idx, match, entropy))
+                        break
+        return findings
+
+    def _find_imports(self, content: str, all_project_files: List[str]) -> List[str]:
+        """Finds referenced project files based on import/require statements (best-effort regex mapping)."""
+        import re
+        imports = []
+        # Match JS/TS/Python/Java import styles
+        matches = re.findall(r"(?:import|require|from)\s+['\"]([^'\"]+)['\"]", content)
+        
+        # Also match Java packaging: import org.sasanlabs...
+        java_matches = re.findall(r"import\s+([\w.]+);", content)
+        for jm in java_matches:
+            path_part = jm.replace(".", "/")
+            matches.append(path_part)
+            
+        for match in matches:
+            match_clean = match.lower().strip("/")
+            # Ignore standard library imports
+            if any(match_clean.startswith(lib) for lib in ("react", "fs", "path", "http", "os", "express", "sql", "flask", "django")):
+                continue
+                
+            for proj_file in all_project_files:
+                proj_file_clean = proj_file.lower().replace("\\", "/")
+                if match_clean in proj_file_clean:
+                    imports.append(proj_file)
+                    break
+        return list(set(imports))
+
+    def _extract_snippets(self, content: str, matched_lines: List[int], window: int = 15) -> str:
+        """Extracts contiguous blocks of code around matched lines, merging overlapping ranges."""
+        if not matched_lines:
+            return ""
+            
+        lines = content.splitlines()
+        total_lines = len(lines)
+        
+        # Calculate raw ranges
+        ranges = []
+        for line_no in matched_lines:
+            start = max(0, line_no - 1 - window)
+            end = min(total_lines - 1, line_no - 1 + window)
+            ranges.append((start, end))
+            
+        # Sort ranges by start line
+        ranges.sort(key=lambda x: x[0])
+        
+        # Merge overlapping ranges
+        merged_ranges = []
+        if ranges:
+            current_start, current_end = ranges[0]
+            for start, end in ranges[1:]:
+                if start <= current_end + 1:
+                    current_end = max(current_end, end)
+                else:
+                    merged_ranges.append((current_start, current_end))
+                    current_start, current_end = start, end
+            merged_ranges.append((current_start, current_end))
+            
+        # Build snippet string
+        snippet_blocks = []
+        for start, end in merged_ranges:
+            block_lines = []
+            for i in range(start, end + 1):
+                block_lines.append(lines[i])
+            snippet_blocks.append(f"--- LINES {start+1}-{end+1} ---\n" + "\n".join(block_lines))
+            
+        return "\n\n".join(snippet_blocks)
+
+    def _gather_codebase_context(self, target_path: str) -> str:
+        """Gathers the directory structure and file contents of the target repository for LLM review."""
+        context = []
+        extensions = (".py", ".java", ".js", ".ts", ".go", ".php", ".rb", ".cpp", ".c", ".h", ".cs", ".sh")
+        
+        # Comprehensive list of ignored directories to filter out templates, build files, and package managers
+        ignored_dirs = (
+            ".git", ".agents", "venv", ".venv", "__pycache__", "node_modules", 
+            "target", "build", "dist", "gradle", ".gradle", ".github", ".idea", 
+            "static", "templates", "assets", "images", "docs", "tests",
+            "test", "spec", "vendor", "bin", "obj", "mock", "mocks", "resources"
+        )
+        
+        context.append("--- DIRECTORY HIERARCHY ---")
+        all_project_files = []
+        try:
+            for root, dirs, files in os.walk(target_path):
+                # Remove ignored directories in-place so os.walk doesn't traverse them
+                dirs[:] = [d for d in dirs if d.lower() not in ignored_dirs and not d.startswith(".")]
+                
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), target_path)
+                    context.append(rel_path)
+                    if file.endswith(extensions):
+                        all_project_files.append(rel_path)
+        except Exception as e:
+            logger.error(f"Failed to list directory structure: {e}")
+            
+        context.append("\n--- FILE CONTENTS ---")
+        
+        # 1. Base risk keywords list
+        risk_keywords = [
+            "eval(", "exec(", "system(", "popen(", "subprocess", "SELECT ", 
+            "INSERT ", "UPDATE ", "DELETE ", "password", "secret", "token", 
+            "api_key", "apikey", "jwt", "unserialize", "unsafe_load", 
+            "process.env", "getParameter", "execute", "db.query", "query("
+        ]
+        
+        # 2. Dynamic framework keyword additions
+        try:
+            package_json = os.path.join(target_path, "package.json")
+            if os.path.exists(package_json):
+                with open(package_json, "r", encoding="utf-8", errors="ignore") as f:
+                    pkg_data = f.read().lower()
+                    if "express" in pkg_data:
+                        risk_keywords.extend(["req.query", "req.params", "req.body", "res.send", "res.write"])
+                    if "pg" in pkg_data or "mysql" in pkg_data or "sequelize" in pkg_data:
+                        risk_keywords.extend(["query(", "execute(", "sequelize.query"])
+            
+            req_txt = os.path.join(target_path, "requirements.txt")
+            if os.path.exists(req_txt):
+                with open(req_txt, "r", encoding="utf-8", errors="ignore") as f:
+                    req_data = f.read().lower()
+                    if "flask" in req_data:
+                        risk_keywords.extend(["request.args", "request.form", "request.values"])
+                    if "django" in req_data:
+                        risk_keywords.extend(["request.GET", "request.POST", "objects.raw"])
+        except Exception as fe:
+            logger.debug(f"Dynamic framework checking failed: {fe}")
+            
+        # 3. Harvest candidates and calculate risk/entropy scores
+        candidates = {}
+        try:
+            for root, dirs, files in os.walk(target_path):
+                dirs[:] = [d for d in dirs if d.lower() not in ignored_dirs and not d.startswith(".")]
+                for file in files:
+                    if file.endswith(extensions):
+                        # Skip test and boilerplate files
+                        file_lower = file.lower()
+                        if any(term in file_lower for term in ("test", "spec", "config", "dummy", "mock", "migration", "package-lock", "yarn", "pnpm")):
+                            continue
+                            
+                        full_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(full_path, target_path)
+                        
+                        if os.path.exists(full_path):
+                            file_size = os.path.getsize(full_path)
+                            # Skip large files (>50KB) to preserve context
+                            if file_size > 50000:
+                                continue
+                            try:
+                                with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                                    content = f.read()
+                                
+                                # Count keyword occurrences
+                                content_lower = content.lower()
+                                keyword_score = sum(content_lower.count(kw.lower()) for kw in risk_keywords)
+                                
+                                # Count high-entropy secrets
+                                secret_findings = self._detect_secrets(content)
+                                secret_score = len(secret_findings) * 5  # Heavily weight hardcoded credentials
+                                
+                                total_score = keyword_score + secret_score
+                                
+                                # Identify matched lines for snippet extraction
+                                matched_lines = []
+                                for idx, line in enumerate(content.splitlines(), 1):
+                                    line_lower = line.lower()
+                                    if any(kw.lower() in line_lower for kw in risk_keywords):
+                                        matched_lines.append(idx)
+                                        
+                                for idx, _, _ in secret_findings:
+                                    matched_lines.append(idx)
+                                    
+                                matched_lines = list(set(matched_lines))
+                                
+                                # Find direct imports/dependencies
+                                imports = self._find_imports(content, all_project_files)
+                                
+                                candidates[rel_path] = {
+                                    "content": content,
+                                    "score": total_score,
+                                    "matched_lines": matched_lines,
+                                    "imports": imports
+                                }
+                            except Exception as fe:
+                                logger.warning(f"Could not read file {rel_path}: {fe}")
+        except Exception as e:
+            logger.error(f"Failed to harvest file candidates: {e}")
+            
+        # 4. Boost scores of imported files to preserve context paths
+        for path, info in list(candidates.items()):
+            if info["score"] > 0:
+                for imp in info["imports"]:
+                    if imp in candidates:
+                        candidates[imp]["score"] += 2  # Boost import score to pull it in
+                        
+        # 5. Sort candidates by score
+        sorted_cands = sorted(candidates.items(), key=lambda x: x[1]["score"], reverse=True)
+        
+        current_chars = 0
+        max_chars = 90000  # Up to 90k characters (~22.5k tokens) to safely fit under DashScope's 30,720 token limit
+        file_count = 0
+        
+        for path, info in sorted_cands:
+            # For high-risk files, extract targeted snippets. For smaller files, load entirely.
+            if len(info["content"]) > 10000 and info["matched_lines"]:
+                content_payload = self._extract_snippets(info["content"], info["matched_lines"])
+                label = "SNIPPETS"
+            else:
+                content_payload = info["content"]
+                label = "FULL"
+                
+            if not content_payload:
+                continue
+                
+            file_entry = f"\nFILE: {path} ({label}, Risk Score: {info['score']})\n```\n{content_payload}\n```"
+            if current_chars + len(file_entry) > max_chars:
+                remaining_space = max_chars - current_chars
+                if remaining_space > 1000:
+                    truncated_content = content_payload[:remaining_space - 100]
+                    file_entry = f"\nFILE: {path} (TRUNCATED, Risk Score: {info['score']})\n```\n{truncated_content}\n```"
+                    context.append(file_entry)
+                    current_chars += len(file_entry)
+                break
+                
+            context.append(file_entry)
+            current_chars += len(file_entry)
+            file_count += 1
+            if file_count >= 40:  # Limit count
+                break
+                
+        return "\n".join(context)
+
     async def _handle_audit(self, target_path: str) -> str:
         """Hook point for LeadAuditor system interaction."""
         logger.info("[AUDIT] Launching LeadAuditor AST-based static scan...")
@@ -154,15 +420,25 @@ class AegisOpsRouter:
             logger.error(f"[AST SCANNER] Failed to execute: {str(ae)}")
             ast_findings = "Lead Auditor AST Scan: Encountered error during parsing."
 
-        # 2. Pass findings to Qwen-Max to synthesize remediation footprint
+        # 2. Gather target codebase structure and file contents for multi-language audit
+        codebase_context = self._gather_codebase_context(target_path)
+
+        # 3. Pass findings and code to Qwen-Max to synthesize remediation footprint
         system_prompt = (
-            "You are the Lead Auditor Agent. Analyze the codebase files and the provided "
-            "static analysis tool AST report. Verify the vulnerabilities, and output a "
-            "clear, consolidated threat model report containing the vulnerability footprint."
+            "You are the Lead Auditor Agent, a senior security researcher. "
+            "Analyze the codebase files provided below along with any AST static analysis findings. "
+            "Identify security vulnerabilities (e.g. Command Injection, SQL Injection, XSS, Path Traversal, "
+            "Hardcoded Credentials, Insecure Deserialization, etc.) in ANY programming language present in the files.\n\n"
+            "CRITICAL: Start your output with a `<thought>` block describing your step-by-step reasoning "
+            "and analysis of the files, and close the block with `</thought>`. After that, "
+            "output a clear threat model report containing the vulnerability footprint: file path, line numbers, "
+            "vulnerability type, severity, description, and code snippet. If no vulnerabilities are found in the files, "
+            "explicitly output 'No vulnerabilities detected in code files.'."
         )
         user_prompt = (
             f"Codebase Target Path: {target_path}\n\n"
-            f"AST Scanner Findings Report:\n{ast_findings}"
+            f"AST Scanner Findings Report:\n{ast_findings}\n\n"
+            f"Codebase Files and Context:\n{codebase_context}"
         )
         
         if self.gateway_available and self.gateway:
@@ -171,18 +447,50 @@ class AegisOpsRouter:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt
                 )
-                return report
+                # Parse out reasoning thoughts
+                import re
+                thought_match = re.search(r"<thought>(.*?)</thought>", report, re.DOTALL)
+                if thought_match:
+                    self._latest_thought = thought_match.group(1).strip()
+                else:
+                    self._latest_thought = "Analyzing directory structures and file content keywords..."
+                clean_report = re.sub(r"<thought>.*?</thought>", "", report, flags=re.DOTALL).strip()
+                return clean_report
             except Exception as e:
                 logger.error(f"[AUDIT] LLM call failed: {str(e)}. Falling back to local AST report.")
                 
+        self._latest_thought = "Simulated Lead Auditor reasoning: parsing Python AST nodes for direct user input SQL injection."
         return ast_findings
 
-    async def _handle_patch(self, audit_report: str, failure_feedback: Optional[Dict[str, str]] = None) -> str:
+    async def _handle_patch(self, audit_report: str, target_path: str, failure_feedback: Optional[Dict[str, str]] = None) -> str:
         """Hook point for PatchDeveloper system interaction."""
         logger.info("[PATCH] Launching PatchDeveloper remediation engine...")
-        system_prompt = "You are the Patch Developer Agent. Generate a minimal, secure git patch."
+        system_prompt = (
+            "You are the Patch Developer Agent. Generate a minimal, secure codebase patch. "
+            "You MUST output the patch using the following Search-and-Replace format:\n\n"
+            "FILE: <relative_file_path>\n"
+            "<<<<<<< SEARCH\n"
+            "<exact lines from the original file to be replaced>\n"
+            "=======\n"
+            "<remediated lines to replace them with>\n"
+            ">>>>>>> REPLACE\n\n"
+            "CRITICAL RULES:\n"
+            "1. Start your output with a `<thought>` block describing your step-by-step patch planning, "
+            "and close the block with `</thought>`. After that, output the Search-and-Replace blocks.\n"
+            "2. Each SEARCH block MUST represent a single, contiguous block of lines that exists verbatim in the file. "
+            "3. If you need to make changes in different parts of a file, you MUST output multiple separate SEARCH/REPLACE blocks for that file. "
+            "Do not skip lines or combine non-contiguous lines into a single SEARCH block.\n"
+            "4. Ensure that the SEARCH block matches the original file code exactly, including leading spaces, tabulations, and newlines.\n"
+            "5. Do not include any markdown code block wrappers (e.g. ```diff), and do not write conversational text outside the SEARCH/REPLACE blocks."
+        )
         
-        user_prompt = f"Audit Findings:\n{audit_report}\n"
+        # Gather codebase context so Patch Developer knows exactly what lines are in the files
+        codebase_context = self._gather_codebase_context(target_path)
+        
+        user_prompt = (
+            f"Audit Findings:\n{audit_report}\n\n"
+            f"Codebase Files and Context:\n{codebase_context}\n"
+        )
         if failure_feedback:
             user_prompt += (
                 f"\nPREVIOUS PATCH FAILED TESTS:\n"
@@ -198,11 +506,30 @@ class AegisOpsRouter:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt
                 )
-                return patch
+                import re
+                thought_match = re.search(r"<thought>(.*?)</thought>", patch, re.DOTALL)
+                if thought_match:
+                    self._latest_thought = thought_match.group(1).strip()
+                else:
+                    self._latest_thought = "Designing Search-and-Replace diff blocks to match codebase parameters..."
+                clean_patch = re.sub(r"<thought>.*?</thought>", "", patch, flags=re.DOTALL).strip()
+                return clean_patch
             except Exception as e:
                 logger.error(f"[PATCH] LLM call failed: {str(e)}. Falling back to mock.")
                 
-        return "Proposed Patch: sanitize input strings before shell execution."
+        self._latest_thought = "Simulated Patch Developer reasoning: Replacing SQL format statement string interpolation with parameter inputs."
+        return (
+            "FILE: app.py\n"
+            "<<<<<<< SEARCH\n"
+            "        # VULNERABLE: Direct string formatting into SQL statement\n"
+            "        query = f\"SELECT secret_key FROM users WHERE username = '{username}'\"\n"
+            "        cursor.execute(query)\n"
+            "=======\n"
+            "        # SECURE: Parameterized SQL statement\n"
+            "        query = \"SELECT secret_key FROM users WHERE username = ?\"\n"
+            "        cursor.execute(query, (username,))\n"
+            ">>>>>>> REPLACE"
+        )
 
     async def _handle_test(self, target_path: str) -> Dict[str, Any]:
         """Runs test suites inside the secure sandbox execution container."""
@@ -228,14 +555,36 @@ class AegisOpsRouter:
             if self.patch_attempts < self.max_retries - 1:
                 return {
                     "exit_code": 1,
-                    "stdout": "pytest failed: AssertionError in test_remediation.py:12",
-                    "stderr": "Traceback: line 12 in test_remediation",
+                    "stdout": (
+                        "============================= test session starts =============================\n"
+                        "platform linux -- Python 3.10.12, pytest-7.4.3, pluggy-1.3.0\n"
+                        "rootdir: /app/sandbox\n"
+                        "collected 3 items\n\n"
+                        "test_app.py .F.                                                          [100%]\n\n"
+                        "================================== FAILURES ===================================\n"
+                        "______________________________ test_sql_injection _____________________________\n\n"
+                        "    def test_sql_injection():\n"
+                        ">       assert 'admin' not in response.text\n"
+                        "E       AssertionError: assert 'admin' not in '{\"status\":\"success\",\"user\":\"admin\"}'\n\n"
+                        "test_app.py:18: AssertionError\n"
+                        "=========================== short test summary info ===========================\n"
+                        "FAILED test_app.py::test_sql_injection - AssertionError\n"
+                        "========================= 1 failed, 2 passed in 0.45s =========================\n"
+                    ),
+                    "stderr": "RuntimeWarning: Insecure database connection detected on fallback execution.",
                     "status": "FAILED"
                 }
             else:
                 return {
                     "exit_code": 0,
-                    "stdout": "pytest passed: 1 passed",
+                    "stdout": (
+                        "============================= test session starts =============================\n"
+                        "platform linux -- Python 3.10.12, pytest-7.4.3, pluggy-1.3.0\n"
+                        "rootdir: /app/sandbox\n"
+                        "collected 3 items\n\n"
+                        "test_app.py ...                                                          [100%]\n\n"
+                        "========================== 3 passed in 0.48s ==========================\n"
+                    ),
                     "stderr": "",
                     "status": "COMPLETED"
                 }
@@ -245,6 +594,11 @@ class AegisOpsRouter:
         if callback:
             try:
                 data_payload = dict(data or {})
+                
+                # Check for recent agent thoughts to stream
+                if hasattr(self, "_latest_thought") and self._latest_thought:
+                    data_payload["thought"] = self._latest_thought
+                    self._latest_thought = ""  # Clear after reading
                 
                 # In simulation mode, record mock calls if we enter states
                 if not (self.gateway_available and self.gateway):
@@ -265,7 +619,7 @@ class AegisOpsRouter:
             except Exception as e:
                 logger.error(f"Callback invocation failed: {str(e)}")
 
-    async def run_pipeline(self, target_path: str, status_callback: Optional[Any] = None, mode: str = "autopilot", approval_callback: Optional[Any] = None) -> str:
+    async def run_pipeline(self, target_path: str, status_callback: Optional[Any] = None, mode: str = "autopilot", approval_callback: Optional[Any] = None) -> Tuple[str, List[str]]:
         """Drives the state-machine execution pipeline synchronously."""
         logger.info(f"=== AegisOps Remediation Pipeline Started: {target_path} ===")
         self._notify(status_callback, "START", f"Starting pipeline on target: {target_path}")
@@ -279,6 +633,7 @@ class AegisOpsRouter:
         last_failure = None
         self.patch_attempts = 0
         self.agent_messages = []  # Reset agent comms for this run
+        self.modified_files = []  # Reset modified files list for this run
         
         try:
             while state not in ("COMPLETED", "ERROR"):
@@ -289,9 +644,15 @@ class AegisOpsRouter:
                     self._log_agent_message("Orchestrator", "Lead Auditor", f"Scan codebase at '{target_path}' for vulnerabilities. Run AST static analysis and generate a threat model report.")
                     self._notify(status_callback, "AUDIT", "Analyzing repository files for security vulnerabilities...")
                     audit_report = await self._handle_audit(target_path)
-                    self._log_agent_message("Lead Auditor", "Patch Developer", "AST scan complete. Vulnerability footprint delivered with CWE classifications, file paths, and line ranges. Requesting surgical patch generation.")
+                    self._log_agent_message("Lead Auditor", "Patch Developer", "AST scan complete. Vulnerability footprint analyzed.")
                     self._notify(status_callback, "AUDIT", "Analysis completed.", {"report": audit_report})
-                    state = self.transitions["AUDIT"]["on_success"]
+                    
+                    if "no vulnerabilities detected" in audit_report.lower():
+                        self._log_agent_message("Lead Auditor", "Orchestrator", "Audit complete. No vulnerabilities found in code files. Codebase is secure!")
+                        self._notify(status_callback, "COMPLETED", "No vulnerabilities found. Codebase is already secure!")
+                        state = "COMPLETED"
+                    else:
+                        state = self.transitions["AUDIT"]["on_success"]
                     
                 elif state == "PATCH":
                     self.patch_attempts += 1
@@ -306,12 +667,13 @@ class AegisOpsRouter:
                         self._restore_snapshot(target_path)
                     
                     # Generate patch
-                    patch = await self._handle_patch(audit_report, last_failure)
+                    patch = await self._handle_patch(audit_report, target_path, last_failure)
                     logger.info(f"Generated Patch: {patch}")
                     self._notify(status_callback, "PATCH", "Patch generated. Applying modifications to files...", {"patch": patch})
                     
                     try:
-                        self.patch_applier.apply_patch(target_base_path=target_path, patch_content=patch)
+                        applied = self.patch_applier.apply_patch(target_base_path=target_path, patch_content=patch)
+                        self.modified_files = list(set(self.modified_files + applied))
                         logger.info("[PATCH] Patch successfully applied to files.")
                         self._log_agent_message("Patch Developer", "Sandbox Engineer", "Patch applied to source files. Requesting isolated container validation with full test suite execution.")
                         self._notify(status_callback, "PATCH", "Patch successfully applied to source files.")
@@ -392,22 +754,22 @@ class AegisOpsRouter:
             if state == "COMPLETED":
                 logger.info("=== AegisOps Remediation Pipeline: SUCCESS ===")
                 self._log_agent_message("Git Manager", "Orchestrator", "Commit successful. PR deployed. Codebase is now secure.")
-                self._notify(status_callback, "COMPLETED", "Pipeline successfully executed. Codebase is secure!")
+                self._notify(status_callback, "COMPLETED", "Pipeline successfully executed. Codebase is secure!", {"modified_files": self.modified_files})
                 self._cleanup_snapshot()
-                return "SUCCESS"
+                return "SUCCESS", self.modified_files
             else:
                 logger.error("=== AegisOps Remediation Pipeline: FAILED ===")
                 self._notify(status_callback, "ERROR", "Remediation failed. Rolling back changes to safety.")
                 self._restore_snapshot(target_path)
                 self._cleanup_snapshot()
-                return "ERROR"
+                return "ERROR", []
 
         except Exception as e:
             logger.error(f"[STATE MACHINE] Unexpected failure in pipeline execution: {str(e)}")
             self._notify(status_callback, "ERROR", f"Unexpected pipeline failure: {str(e)}")
             self._restore_snapshot(target_path)
             self._cleanup_snapshot()
-            return "ERROR"
+            return "ERROR", []
 
 if __name__ == "__main__":
     # Diagnostic execution

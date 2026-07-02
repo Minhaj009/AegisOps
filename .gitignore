@@ -21,3 +21,12 @@ GEMINI.md
 # Local environment variables
 .env
 
+# Cloned repositories and downloads
+clones/
+
+# Terraform temporary and state files
+deploy/.terraform/
+deploy/.terraform.lock.hcl
+deploy/terraform*
+*.tfstate
+*.tfstate.backup

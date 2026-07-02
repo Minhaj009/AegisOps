@@ -23,8 +23,10 @@
             </div>
 
             <div class="nav-status">
+                <span class="cloud-badge studio-badge"><i class="fa-solid fa-brain"></i> Alibaba Model Studio (Qwen-Max)</span>
+                <span class="cloud-badge ecs-badge"><i class="fa-solid fa-server"></i> Alibaba Cloud ECS</span>
                 <span class="status-indicator"></span>
-                <span class="status-label">Alibaba Cloud Active</span>
+                <span class="status-label">Active</span>
             </div>
         </nav>
 
@@ -161,9 +163,14 @@
                 <div class="content-pane">
                     <!-- Surgical Code Diff View -->
                     <section class="workspace-card diff-card">
-                        <div class="card-title">
-                            <i class="fa-solid fa-code-compare"></i>
-                            <h2>Surgical Code Patch Diffs</h2>
+                        <div class="card-title diff-card-header">
+                            <div class="title-left">
+                                <i class="fa-solid fa-code-compare"></i>
+                                <h2>Surgical Code Patch Diffs</h2>
+                            </div>
+                            <button id="download-btn" class="download-btn hidden" disabled>
+                                <i class="fa-solid fa-download"></i> Download Remediated Code
+                            </button>
                         </div>
                         <div class="diff-split-viewer">
                             <!-- Left Pane: Original Code (Deletions) -->
@@ -201,6 +208,22 @@
                             <button id="reject-btn" class="reject-btn">
                                 <i class="fa-solid fa-xmark"></i> Reject & Rollback
                             </button>
+                        </div>
+                    </section>
+
+                    <!-- Collapsible Agent Reasoning & Thought Process -->
+                    <section class="workspace-card reasoning-card collapsible-card collapsed">
+                        <div class="card-title reasoning-header" onclick="toggleReasoning()">
+                            <div class="title-left">
+                                <i class="fa-solid fa-lightbulb"></i>
+                                <h2>Agent Reasoning &amp; Thought Process</h2>
+                            </div>
+                            <span id="reasoning-toggle" class="reasoning-toggle-icon"><i class="fa-solid fa-chevron-down"></i></span>
+                        </div>
+                        <div class="reasoning-content-wrapper">
+                            <div id="reasoning-box" class="reasoning-buffer jetbrains-mono">
+                                <span class="reasoning-placeholder">No active thoughts. Run a scan to see real-time Qwen-Max chain-of-thought analysis.</span>
+                            </div>
                         </div>
                     </section>
 

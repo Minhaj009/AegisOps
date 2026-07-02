@@ -92,22 +92,55 @@ class PatchApplier:
                 file_text = f.read()
 
             for search_block, replace_block in chunks:
-                # We do exact string matching to prevent regex side-effects
-                if search_block not in file_text:
-                    # Provide helpful diagnostic context on search failure
-                    snippet = search_block[:100] + "..." if len(search_block) > 100 else search_block
-                    raise LookupError(
-                        f"Search block not found in file '{file_to_patch}':\n{snippet}"
-                    )
-
-                # Ensure there is exactly one occurrence to avoid ambiguous replacements
-                occurrences = file_text.count(search_block)
-                if occurrences > 1:
-                    raise ValueError(
-                        f"Ambiguous replacement! Found {occurrences} occurrences of search block in '{file_to_patch}'."
-                    )
-
-                file_text = file_text.replace(search_block, replace_block)
+                # 1. Normalize line endings to \n for both file and search/replace blocks
+                normalized_file = file_text.replace("\r\n", "\n").replace("\r", "\n")
+                normalized_search = search_block.replace("\r\n", "\n").replace("\r", "\n")
+                normalized_replace = replace_block.replace("\r\n", "\n").replace("\r", "\n")
+                
+                # Check exact normalized match first
+                exact_index = normalized_file.find(normalized_search)
+                if exact_index != -1:
+                    file_text = normalized_file.replace(normalized_search, normalized_replace, 1)
+                else:
+                    # 2. Fuzzy spacing matching (for split lines, indentation, spacing variations)
+                    # Split search block into word tokens, whitespace tokens, and individual punctuation tokens
+                    tokens = re.split(r"(\s+|[a-zA-Z0-9_]+)", normalized_search)
+                    regex_parts = []
+                    last_was_space = False
+                    
+                    for token in tokens:
+                        if not token:
+                            continue
+                        if token.isspace():
+                            regex_parts.append(r"\s+")
+                            last_was_space = True
+                        else:
+                            if regex_parts and not last_was_space:
+                                regex_parts.append(r"\s*")
+                            regex_parts.append(re.escape(token))
+                            last_was_space = False
+                            
+                    pattern_str = r"\s*" + "".join(regex_parts) + r"\s*"
+                    
+                    try:
+                        pattern = re.compile(pattern_str, re.DOTALL)
+                        matches = list(pattern.finditer(normalized_file))
+                        
+                        if not matches:
+                            snippet = search_block[:100] + "..." if len(search_block) > 100 else search_block
+                            raise LookupError(
+                                f"Search block not found in file '{file_to_patch}' (even after fuzzy matching):\n{snippet}"
+                            )
+                        
+                        # Apply to the first match
+                        m = matches[0]
+                        normalized_file = normalized_file[:m.start()] + normalized_replace + normalized_file[m.end():]
+                        file_text = normalized_file
+                        
+                    except re.error as re_err:
+                        logger.error(f"Fuzzy regex compilation failed for search block: {re_err}")
+                        snippet = search_block[:100] + "..." if len(search_block) > 100 else search_block
+                        raise LookupError(f"Search block not found in file '{file_to_patch}':\n{snippet}")
 
             # Write back modified code
             with open(abs_file_path, "w", encoding="utf-8") as f:

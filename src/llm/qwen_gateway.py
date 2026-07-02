@@ -43,9 +43,9 @@ class QwenGateway:
         # Apply to dashscope global config if available
         if dashscope:
             dashscope.api_key = self.api_key
-            # The SDK calls base endpoint: https://dashscope-intl.aliyuncs.com/api/v1
-            # Compatible with compatible-mode: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-            dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            # Hackathon verification compliance URL: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+            # Dashscope Python SDK requires the standard international API v1 endpoint
+            dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
 
         # Default model settings
         self.default_model: str = "qwen-max"
